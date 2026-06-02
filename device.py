@@ -6,8 +6,8 @@ from typing import Optional
 
 
 class DeviceStatus(Enum):
-    ONLINE   = "Online"
-    OFFLINE  = "Offline"
+    ONLINE   = "В сети"
+    OFFLINE  = "Не в сети"
     UNKNOWN  = "Неизвестно"
     CHECKING = "Проверка..."
 

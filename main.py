@@ -212,7 +212,7 @@ class MapData:
 class NetworkMapApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Network Map — Zabbix Style Monitor")
+        self.root.title("Карта сети — Монитор в стиле Zabbix")
         self.root.geometry("1340x800")
         self.root.configure(bg=COLORS["bg"])
         self.root.minsize(900, 600)
@@ -443,11 +443,11 @@ class NetworkMapApp:
         if self.current_tab_name:
             tab = self.tabs[self.current_tab_name]
             if tab.file_path:
-                title = f"Network Map — {tab.name} ({os.path.basename(tab.file_path)})"
+                title = f"Карта сети — {tab.name} ({os.path.basename(tab.file_path)})"
             else:
-                title = f"Network Map — {tab.name} [не сохранено]"
+                title = f"Карта сети — {tab.name} [не сохранено]"
         else:
-            title = "Network Map"
+            title = "Карта сети"
         self.root.title(title)
 
     @property
@@ -495,7 +495,7 @@ class NetworkMapApp:
         tb.pack(fill="x", side="top")
         tb.pack_propagate(False)
 
-        tk.Label(tb, text="  🗺 NetMap", font=("Consolas", 14, "bold"),
+        tk.Label(tb, text="  🗺 КартаСети", font=("Consolas", 14, "bold"),
                  bg=C["toolbar"], fg=C["accent"]).pack(side="left", padx=(12, 20), pady=8)
         tk.Frame(tb, bg=C["border"], width=1).pack(side="left", fill="y", pady=8)
 
@@ -591,9 +591,9 @@ class NetworkMapApp:
 
         stats = tk.Frame(panel, bg=C["bg2"], pady=8)
         stats.pack(fill="x", padx=12)
-        self.stat_total   = self._stat_label(stats, "Всего",   "0", C["text"])
-        self.stat_online  = self._stat_label(stats, "Online",  "0", C["online"])
-        self.stat_offline = self._stat_label(stats, "Offline", "0", C["offline"])
+        self.stat_total   = self._stat_label(stats, "Всего",      "0", C["text"])
+        self.stat_online  = self._stat_label(stats, "В сети",     "0", C["online"])
+        self.stat_offline = self._stat_label(stats, "Не в сети",  "0", C["offline"])
 
         tk.Frame(panel, bg=C["border"], height=1).pack(fill="x")
         tk.Label(panel, text="Список устройств", font=("Consolas", 9),
@@ -617,8 +617,8 @@ class NetworkMapApp:
         leg = tk.Frame(panel, bg=C["bg2"], pady=8)
         leg.pack(fill="x", padx=12)
         for dot, color, label in [
-            ("●", C["online"],  " Online"),
-            ("●", C["offline"], " Offline"),
+            ("●", C["online"],  " В сети"),
+            ("●", C["offline"], " Не в сети"),
             ("●", C["unknown"], " Неизвестно"),
             ("●", C["checking"]," Проверка"),
         ]:
@@ -1478,8 +1478,8 @@ class NetworkMapApp:
         if new_status == DeviceStatus.ONLINE and not self.alert_on_online.get():
             return
         status_map = {
-            DeviceStatus.ONLINE:  "✅ ONLINE",
-            DeviceStatus.OFFLINE: "❌ OFFLINE",
+            DeviceStatus.ONLINE:  "✅ В СЕТИ",
+            DeviceStatus.OFFLINE: "❌ НЕ В СЕТИ",
             DeviceStatus.UNKNOWN: "❔ НЕИЗВЕСТНО",
         }
         old_txt = status_map.get(old_status, "?")
