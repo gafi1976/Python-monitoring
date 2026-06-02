@@ -834,8 +834,20 @@ class NetworkMapApp:
 
             snmp_info = getattr(dev, "snmp_last_info", None)
             if dev.snmp_enabled and snmp_info and isinstance(snmp_info, dict):
+                # Собираем метки, которые уже показываются на линиях соединений
+                # чтобы не дублировать их в блоке под иконкой устройства
+                tab = self.current_tab
+                labels_on_lines: set[str] = set()
+                if tab:
+                    for (a, b) in tab.connections:
+                        if a == dev_id or b == dev_id:
+                            for slot in self.conn_labels.get(a, b):
+                                if slot.get("source_dev") == dev_id:
+                                    labels_on_lines.add(slot.get("oid_label", ""))
+
                 metrics = [(k, v) for k, v in snmp_info.items()
-                           if v and not str(v).startswith("Ошибка")]
+                           if v and not str(v).startswith("Ошибка")
+                           and k not in labels_on_lines]
                 if metrics:
                     pill_h = len(metrics) * 20 + 10
                     pill_w = 190
