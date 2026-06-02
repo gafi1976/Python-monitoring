@@ -24,6 +24,35 @@ from collections import deque
 from tkinter import filedialog
 from snmp_lld import LLDDialog
 from connection_label import ConnectionLabelManager, ConnectionLabelDialog
+
+# Кэш PNG-иконок устройств
+_PNG_ICON_CACHE: dict[str, object] = {}
+
+def _load_png_icon(path: str, size: int = 40):
+    """Загружает PNG и масштабирует до size×size. Возвращает PhotoImage или None."""
+    if not path or not os.path.isfile(path):
+        return None
+    cache_key = f"{path}@{size}"
+    if cache_key in _PNG_ICON_CACHE:
+        return _PNG_ICON_CACHE[cache_key]
+    try:
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(path).convert("RGBA").resize((size, size))
+            photo = ImageTk.PhotoImage(img)
+        except ImportError:
+            # Без Pillow — пробуем нативный Tkinter (только GIF/PNG без масштаба)
+            photo = tk.PhotoImage(file=path)
+            # Простое масштабирование через subsample/zoom (грубое)
+            w, h = photo.width(), photo.height()
+            if w > 0 and h > 0:
+                factor = max(1, max(w, h) // size)
+                photo = photo.subsample(factor, factor)
+        _PNG_ICON_CACHE[cache_key] = photo
+        return photo
+    except Exception as e:
+        print(f"[Icon] не удалось загрузить {path}: {e}")
+        return None
     
 
 # ── pysnmp 7.x asyncio API ───────────────────────────────────────────────────
@@ -246,6 +275,9 @@ class NetworkMapApp:
         self._draw_all()
         self.root.bind('<Control-z>', self._undo)
         self.root.bind('<Control-Z>', self._undo)
+
+        # Запуск фонового опроса SNMP-метрик на линиях
+        self.conn_labels.start_polling(self)
 
     def _open_lld_for(self, dev_id: str):
         tab = self.current_tab
@@ -651,6 +683,8 @@ class NetworkMapApp:
         self.canvas.bind("<Button-2>",        self._on_pan_start)
         self.canvas.bind("<B2-Motion>",       self._on_pan_drag)
         self.canvas.bind("<Configure>",       lambda e: self._draw_all())
+        self.canvas.bind("<Motion>",          self._on_canvas_motion)
+        self.canvas.bind("<Leave>",           lambda e: self.conn_labels.hide_tooltip(self.canvas))
         self.connect_label = tk.Label(cf,
             text="🔗 Режим соединения: кликните на два устройства",
             font=("Consolas", 10), bg="#1a2a3a", fg=C["accent"], padx=10, pady=4)
@@ -685,6 +719,7 @@ class NetworkMapApp:
 
     def _draw_all(self):
         self.canvas.delete("all")
+        self._icon_refs = []   # сброс кэша ссылок на иконки (GC-защита)
         self._draw_grid()
         self._draw_connections()
         self._draw_devices()
@@ -743,10 +778,19 @@ class NetworkMapApp:
             self.canvas.create_oval(x-sz, y-sz, x+sz, y+sz,
                                     fill=C["bg3"], outline=sc,
                                     width=2 if not is_sel else 3)
-            icon = DEVICE_ICONS.get(dev.dtype, DEVICE_ICONS["other"])
-            self.canvas.create_text(x+1, y-5, text=icon, font=("Segoe UI Emoji", 24), fill="#000000")
-            self.canvas.create_text(x, y-6, text=icon, font=("Segoe UI Emoji", 24), fill=C["accent"])
-
+            # Иконка: PNG или emoji
+            icon_path = getattr(dev, "icon_path", "")
+            png_img = _load_png_icon(icon_path, size=40) if icon_path else None
+            if png_img:
+                # Держим ссылку чтобы не удалил GC
+                if not hasattr(self, "_icon_refs"):
+                    self._icon_refs = []
+                self._icon_refs.append(png_img)
+                self.canvas.create_image(x, y - 6, image=png_img, anchor="center")
+            else:
+                icon = DEVICE_ICONS.get(dev.dtype, DEVICE_ICONS["other"])
+                self.canvas.create_text(x+1, y-5, text=icon, font=("Segoe UI Emoji", 24), fill="#000000")
+                self.canvas.create_text(x, y-6, text=icon, font=("Segoe UI Emoji", 24), fill=C["accent"])
             self.canvas.create_oval(x+sz-12, y-sz, x+sz, y-sz+12,
                                     fill=sc, outline=C["bg"], width=1.5)
 
@@ -935,6 +979,22 @@ class NetworkMapApp:
 
     def _on_pan_drag(self, event):
         self._on_canvas_drag(event)
+
+    def _on_canvas_motion(self, event):
+        """Тултип при наведении на линию соединения."""
+        conn = self.conn_labels.get_connection_at(
+            event.x, event.y,
+            self.connections, self.devices, self.canvas_offset
+        )
+        if conn:
+            self.canvas.config(cursor="hand2")
+            self.conn_labels.show_tooltip(
+                self.canvas, event.x, event.y,
+                conn[0], conn[1], self.devices, COLORS
+            )
+        else:
+            self.canvas.config(cursor="crosshair")
+            self.conn_labels.hide_tooltip(self.canvas)
 
     # ──────────────────────────────────────────────────────────────────────────
     #  Список устройств
@@ -1558,6 +1618,7 @@ class NetworkMapApp:
 
     def on_close(self):
         self.monitoring_active = False
+        self.conn_labels.stop_polling()
         if messagebox.askyesno("Выход", "Сохранить изменения?", parent=self.root):
             self._save_current_map()
         self.root.destroy()

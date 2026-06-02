@@ -1,7 +1,8 @@
 """Device settings dialog with SNMP triggers and factor (coefficient)"""
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
+import os
 from device import Device
 from snmp_lld import LLDDialog
 
@@ -34,6 +35,7 @@ class DeviceSettingsDialog:
         self.var_community = tk.StringVar(value=dev.snmp_community)
         self.var_port = tk.StringVar(value=str(dev.snmp_port))
         self.var_version = tk.StringVar(value=dev.snmp_version)
+        self.var_icon_path = tk.StringVar(value=getattr(dev, 'icon_path', ''))
 
         self._build()
 
@@ -126,6 +128,37 @@ class DeviceSettingsDialog:
         self.ping_status_lbl = tk.Label(ping_frame, text="", bg=C["bg"], padx=10)
         self.ping_status_lbl.pack(side="left")
         self._update_ping_label()
+        row += 1
+
+        # ─── Иконка PNG ────────────────────────────────────────────────────
+        tk.Label(general_tab, text="Иконка PNG:", bg=C["bg"], fg=C["text_dim"], anchor="w").grid(row=row, column=0, sticky="w", pady=5)
+        icon_frame = tk.Frame(general_tab, bg=C["bg"])
+        icon_frame.grid(row=row, column=1, sticky="ew", padx=10, pady=5)
+        icon_frame.columnconfigure(0, weight=1)
+
+        self.icon_entry = tk.Entry(icon_frame, textvariable=self.var_icon_path,
+                                   bg=C["bg3"], fg=C["text"], insertbackground=C["text"],
+                                   borderwidth=1, relief="flat")
+        self.icon_entry.grid(row=0, column=0, sticky="ew")
+
+        tk.Button(icon_frame, text="📂 Обзор…",
+                  command=self._browse_icon,
+                  bg=C["bg3"], fg=C["accent"],
+                  relief="flat", bd=0, font=("Consolas", 9),
+                  padx=8, pady=2, cursor="hand2").grid(row=0, column=1, padx=(4, 0))
+
+        tk.Button(icon_frame, text="✕",
+                  command=lambda: self.var_icon_path.set(""),
+                  bg=C["bg3"], fg=C["danger"],
+                  relief="flat", bd=0, font=("Consolas", 9),
+                  padx=6, pady=2, cursor="hand2").grid(row=0, column=2, padx=(2, 0))
+
+        self.icon_preview = tk.Label(general_tab, text="", bg=C["bg"], fg=C["text_dim"],
+                                     font=("Consolas", 8))
+        self.icon_preview.grid(row=row+1, column=1, sticky="w", padx=10)
+        self.var_icon_path.trace_add("write", lambda *_: self._update_icon_preview())
+        self._update_icon_preview()
+        row += 2
 
         # ─── SNMP Метрики и триггеры (с коэффициентом) ────────────────────
         snmp_tab = tk.Frame(notebook, bg=C["bg"], padx=15, pady=15)
@@ -264,7 +297,6 @@ class DeviceSettingsDialog:
         tk.Button(dlg_btns, text="Отмена", bg=C["bg3"], fg=C["text"], font=("Consolas", 10),
                   command=self.dialog.destroy, width=10, relief="flat").pack(side="right")
 
-    # Вспомогательные методы
     def _update_ping_label(self):
         C = self.colors
         enabled = self.var_ping.get()
@@ -272,6 +304,32 @@ class DeviceSettingsDialog:
             text="●  Ping включён" if enabled else "○  Ping выключен",
             fg=C["online"] if enabled else C["text_dim"]
         )
+
+    def _browse_icon(self):
+        path = filedialog.askopenfilename(
+            parent=self.dialog,
+            title="Выбрать иконку устройства",
+            filetypes=[
+                ("PNG изображения", "*.png"),
+                ("Все изображения", "*.png *.jpg *.gif *.bmp"),
+                ("Все файлы", "*.*"),
+            ],
+        )
+        if path:
+            self.var_icon_path.set(path)
+
+    def _update_icon_preview(self):
+        path = self.var_icon_path.get().strip()
+        C = self.colors
+        if not path:
+            self.icon_preview.config(
+                text="Иконка не выбрана (используется стандартная эмодзи)",
+                fg=C["text_dim"])
+        elif os.path.isfile(path):
+            fname = os.path.basename(path)
+            self.icon_preview.config(text=f"✓ {fname}", fg=C["online"])
+        else:
+            self.icon_preview.config(text="⚠ Файл не найден", fg=C["warning"])
 
     def _update_snmp_state(self):
         state = "normal" if self.var_snmp.get() else "disabled"
@@ -362,6 +420,7 @@ class DeviceSettingsDialog:
         try: dev.snmp_port = int(self.var_port.get().strip())
         except: dev.snmp_port = 161
         dev.snmp_version = self.var_version.get()
+        dev.icon_path = self.var_icon_path.get().strip()
 
         dev.snmp_oids = []
         for child in self.oid_tree.get_children():

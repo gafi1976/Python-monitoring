@@ -46,6 +46,9 @@ class Device:
     snmp_last_info: Optional[dict] = None
 
 
+    # Custom icon (path to PNG file)
+    icon_path:     str            = ""
+
     # Extra
     description:   str            = ""
     location:      str            = ""
@@ -68,6 +71,7 @@ class Device:
             "description":   self.description,
             "location":      self.location,
             "snmp_lld_rules": self.snmp_lld_rules,
+            "icon_path":     self.icon_path,
         }
 
     @staticmethod
@@ -97,4 +101,5 @@ class Device:
         dev.check_interval = data.get("check_interval", 30)
         dev.description    = data.get("description", "")
         dev.location       = data.get("location", "")
+        dev.icon_path      = data.get("icon_path", "")
         return dev
