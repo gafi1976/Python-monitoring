@@ -1086,11 +1086,21 @@ class NetworkMapApp:
             self.connect_label.place_forget()
 
     def _disconnect_selected(self):
+        tab = self.current_tab
+        if not tab:
+            return
         if hasattr(self, 'selected_device') and self.selected_device:
-            self._snapshot()
             dev_id = self.selected_device
-            self.connections = [(a, b) for (a, b) in self.connections
-                                if a != dev_id and b != dev_id]
+            new_conns = [(a, b) for (a, b) in tab.connections
+                         if a != dev_id and b != dev_id]
+            if len(new_conns) == len(tab.connections):
+                self._set_status(f"Нет соединений у выбранного устройства")
+                return
+            self._snapshot()
+            tab.connections = new_conns
+            # Удаляем метки линий этого устройства
+            self.conn_labels.remove(dev_id, dev_id)  # cleanup
+            self._set_status(f"Соединения удалены")
             self._draw_all()
 
     def _open_device_settings(self, dev_id: str):
