@@ -402,7 +402,12 @@ function applyMapInterval() {
   if (_mapTimer) clearInterval(_mapTimer);
   _mapTimer = setInterval(function(){
     loadTabs();
-    loadMapForTab(currentTab);
+    // Если SSE активен — не делаем полный reload карты, только вкладки
+    if (!_sseActive) {
+      loadMapForTab(currentTab);
+    } else {
+      loadSummary();
+    }
   }, CFG.mapInterval);
 }
 
@@ -1928,11 +1933,114 @@ loadMapForTab = function(tabName) {
   }).catch(function(e){ console.error('loadMapForTab:', e); });
 };
 
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 14: SSE вместо polling (Server-Sent Events)
+// ════════════════════════════════════════════════════════════════════════════
+var _sse        = null;
+var _sseActive  = false;
+var _sseRetries = 0;
+
+function startSSE() {
+  if (_sse) { _sse.close(); _sse = null; }
+  _sse = new EventSource('/api/stream');
+  _sseActive = true;
+
+  // Первый снимок — полная карта
+  _sse.addEventListener('init', function(e) {
+    var d = JSON.parse(e.data);
+    checkStatusChanges(d.map.devices);
+    checkAndNotify(d.map.devices);
+    mapData    = d.map;
+    var st     = d.stats;
+    if (st.role) _myRole = st.role;
+    document.getElementById('s-on').textContent  = st.online  || 0;
+    document.getElementById('s-off').textContent = st.offline || 0;
+    document.getElementById('s-unk').textContent = st.unknown || 0;
+    document.getElementById('upd').textContent   = st.updated || '';
+    if (!currentTab && d.map.tab) {
+      currentTab = d.map.tab;
+    }
+    centerMap();
+    renderList();
+    loadTabs();
+    draw();
+    loadSummary();
+    adjustWrapForSummary();
+    _sseRetries = 0;
+    // Обновляем индикатор в тулбаре
+    document.getElementById('upd').style.color = '#50fa7b';
+    document.getElementById('upd').title = 'Live (SSE)';
+  });
+
+  // Частичные обновления — только изменившиеся устройства
+  _sse.addEventListener('update', function(e) {
+    var d = JSON.parse(e.data);
+    checkStatusChanges(d.changes);
+    checkAndNotify(d.changes);
+    // Обновляем только изменившиеся устройства без полной перезагрузки
+    d.changes.forEach(function(upd) {
+      for (var i = 0; i < mapData.devices.length; i++) {
+        if (mapData.devices[i].id === upd.id) {
+          mapData.devices[i].status       = upd.status;
+          mapData.devices[i].latency      = upd.latency;
+          mapData.devices[i].last_checked = upd.last_checked;
+          mapData.devices[i].snmp_info    = upd.snmp_info;
+          break;
+        }
+      }
+    });
+    // Пересчитываем счётчики
+    var online = 0, offline = 0, unknown = 0;
+    mapData.devices.forEach(function(d) {
+      if      (d.status === 'Online')  online++;
+      else if (d.status === 'Offline') offline++;
+      else                              unknown++;
+    });
+    document.getElementById('s-on').textContent  = online;
+    document.getElementById('s-off').textContent = offline;
+    document.getElementById('s-unk').textContent = unknown;
+    document.getElementById('upd').textContent   = new Date().toLocaleTimeString();
+    renderList();
+    var sel = null;
+    mapData.devices.forEach(function(dv){ if(dv.id===selId) sel=dv; });
+    showDetail(sel);
+    draw();
+    loadSummary();
+  });
+
+  // ping — keepalive, ничего не делаем
+  _sse.addEventListener('ping', function() {});
+
+  _sse.onerror = function() {
+    _sseActive = false;
+    _sse.close();
+    _sse = null;
+    document.getElementById('upd').style.color = '#f1fa8c';
+    document.getElementById('upd').title = 'Reconnecting...';
+    _sseRetries++;
+    // Экспоненциальная задержка: 1s, 2s, 4s, 8s, max 30s
+    var delay = Math.min(1000 * Math.pow(2, _sseRetries - 1), 30000);
+    setTimeout(function() {
+      if (!_sseActive) startSSE();
+    }, delay);
+    // Fallback polling пока SSE не восстановится
+    loadAll();
+  };
+}
+
 window.addEventListener('load', function(){
   resize();
   requestNotificationPermission();
   loadAll();
-  applyMapInterval();
+  // Запускаем SSE — если браузер поддерживает
+  if (typeof EventSource !== 'undefined') {
+    startSSE();
+    // SSE заменяет polling — но оставляем редкий polling для вкладок
+    applyMapInterval();
+  } else {
+    // Fallback для старых браузеров
+    applyMapInterval();
+  }
 });
 </script>
 </body>

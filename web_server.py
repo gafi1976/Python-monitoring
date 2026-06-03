@@ -76,6 +76,7 @@ class NetMapWebServer:
         }
         self.credentials  = {"admin": _hash_pw("admin")}
         self.auth_enabled = True
+        self._sse_clients: set = set()   # активные SSE соединения
 
     def set_credentials(self, username: str, password: str, role: str = "admin"):
         self.users[username] = {"password": _hash_pw(password), "role": role}
@@ -241,6 +242,70 @@ class NetMapWebServer:
                 return jsonify({"ok": True, "size_mb": round(size_mb, 2)})
             except Exception as e:
                 return jsonify({"ok": False, "error": str(e)})
+
+        # ── SSE: мгновенные обновления без polling ────────────────────────────
+        @flask_app.route("/api/stream")
+        def api_stream():
+            if not srv._check_auth():
+                return Response("data: {\"error\":\"unauthorized\"}\n\n",
+                                status=401, mimetype="text/event-stream")
+
+            def generate():
+                last_sent = {}   # dev_id -> (status, latency_bucket)
+                client_id = id(generate)
+                srv._sse_clients.add(client_id)
+                try:
+                    # Первое сообщение — полный снимок карты
+                    import json as _json
+                    full  = srv._map_data(None)
+                    stats = srv._stats(None)
+                    yield f"event: init\ndata: {_json.dumps({'map': full, 'stats': stats}, ensure_ascii=False)}\n\n"
+
+                    while srv.running:
+                        time.sleep(1)
+                        tab = srv.app.current_tab
+                        if not tab:
+                            yield "event: ping\ndata: {}\n\n"
+                            continue
+
+                        # Отправляем только изменения статусов
+                        changes = []
+                        for dev_id, dev in tab.devices.items():
+                            lat_bucket = int((dev.latency or 0) / 10)
+                            key = (dev.status.value, lat_bucket,
+                                   str(getattr(dev, "snmp_last_info", None)))
+                            if last_sent.get(dev_id) != key:
+                                last_sent[dev_id] = key
+                                snmp = getattr(dev, "snmp_last_info", None) or {}
+                                changes.append({
+                                    "id":           dev_id,
+                                    "status":       dev.status.value,
+                                    "latency":      dev.latency,
+                                    "last_checked": dev.last_checked,
+                                    "snmp_info":    snmp,
+                                })
+
+                        if changes:
+                            payload = _json.dumps({"changes": changes}, ensure_ascii=False)
+                            yield f"event: update\ndata: {payload}\n\n"
+                        else:
+                            # keepalive каждую секунду
+                            yield "event: ping\ndata: {}\n\n"
+
+                except GeneratorExit:
+                    pass
+                finally:
+                    srv._sse_clients.discard(client_id)
+
+            return Response(
+                generate(),
+                mimetype="text/event-stream",
+                headers={
+                    "Cache-Control":     "no-cache",
+                    "X-Accel-Buffering": "no",
+                    "Connection":        "keep-alive",
+                }
+            )
 
         # ── Лог событий ───────────────────────────────────────────────────────
         @flask_app.route("/api/events")
