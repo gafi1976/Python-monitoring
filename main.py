@@ -1689,6 +1689,14 @@ class NetworkMapApp:
             if triggered and (now - last) > 300:
                 oid_cfg["last_alert"] = now
                 self._send_snmp_trigger_alert(dev, label, numeric, condition, threshold, raw_value)
+                reporter.history_db.add_event(
+                    event_type="snmp_trigger",
+                    message=f"{label} = {raw_value} {condition} {threshold}",
+                    device_id=dev.dev_id,
+                    device_name=dev.name,
+                    device_ip=dev.ip,
+                    severity="warning"
+                )
 
     def _extract_number(self, s: str) -> Optional[float]:
         match = re.search(r"[-+]?\d*\.?\d+", str(s))
@@ -1758,6 +1766,17 @@ class NetworkMapApp:
                                     dev.name, dev.ip,
                                     prev if prev is not None else DeviceStatus.UNKNOWN,
                                     new_status
+                                )
+                                # Логируем событие
+                                sev = "critical" if new_status == DeviceStatus.OFFLINE else "info"
+                                prev_str = prev.value if prev else "Unknown"
+                                reporter.history_db.add_event(
+                                    event_type="status_change",
+                                    message=f"{prev_str} → {new_status.value}",
+                                    device_id=dev_id,
+                                    device_name=dev.name,
+                                    device_ip=dev.ip,
+                                    severity=sev
                                 )
                         tab._prev_stable[dev_id] = new_status
                     dev.status = new_status

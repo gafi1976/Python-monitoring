@@ -70,16 +70,18 @@ class NetMapWebServer:
         self.running     = False
         self._thread     = None
         self._flask      = None
-        # Учётные данные: {username: hashed_password}
-        self.credentials = dict(DEFAULT_CREDENTIALS)
-        # Можно задать через Tkinter-диалог
+        # Пользователи с ролями: {username: {password: hash, role: "admin"|"viewer"}}
+        self.users = {
+            "admin": {"password": _hash_pw("admin"), "role": "admin"}
+        }
+        self.credentials  = {"admin": _hash_pw("admin")}
         self.auth_enabled = True
 
-    def set_credentials(self, username: str, password: str):
-        self.credentials = {username: _hash_pw(password)}
+    def set_credentials(self, username: str, password: str, role: str = "admin"):
+        self.users[username] = {"password": _hash_pw(password), "role": role}
+        self.credentials = {u: v["password"] for u, v in self.users.items()}
 
     def _check_auth(self) -> bool:
-        """Проверяет токен сессии из cookie."""
         if not self.auth_enabled:
             return True
         token = request.cookies.get("nm_token", "")
@@ -90,6 +92,18 @@ class NetMapWebServer:
             _sessions.pop(token, None)
             return False
         return True
+
+    def _is_admin(self) -> bool:
+        token = request.cookies.get("nm_token", "")
+        sess  = _sessions.get(token, {})
+        user  = sess.get("user", "")
+        return self.users.get(user, {}).get("role") == "admin"
+
+    def _get_role(self) -> str:
+        token = request.cookies.get("nm_token", "")
+        sess  = _sessions.get(token, {})
+        user  = sess.get("user", "")
+        return self.users.get(user, {}).get("role", "viewer")
 
     def start(self):
         if not FLASK_OK:
@@ -138,11 +152,15 @@ class NetMapWebServer:
             data = request.get_json(silent=True) or {}
             username = data.get("username", "").strip()
             password = data.get("password", "")
-            stored   = srv.credentials.get(username)
-            if stored and stored == _hash_pw(password):
+            user_data = srv.users.get(username)
+            if user_data and user_data["password"] == _hash_pw(password):
                 token = secrets.token_hex(24)
-                _sessions[token] = {"user": username, "created": time.time()}
-                resp = jsonify({"ok": True})
+                _sessions[token] = {
+                    "user": username,
+                    "role": user_data.get("role", "viewer"),
+                    "created": time.time()
+                }
+                resp = jsonify({"ok": True, "role": user_data.get("role", "viewer")})
                 resp.set_cookie("nm_token", token, httponly=True,
                                 max_age=_SESSION_TTL, samesite="Lax")
                 return resp
@@ -223,6 +241,123 @@ class NetMapWebServer:
                 return jsonify({"ok": True, "size_mb": round(size_mb, 2)})
             except Exception as e:
                 return jsonify({"ok": False, "error": str(e)})
+
+        # ── Лог событий ───────────────────────────────────────────────────────
+        @flask_app.route("/api/events")
+        def api_events():
+            if not srv._check_auth(): return _need_auth()
+            try:
+                import reporter
+                limit  = int(request.args.get("limit", 100))
+                etype  = request.args.get("type")
+                events = reporter.history_db.get_events(limit=limit, event_type=etype or None)
+                return jsonify({"ok": True, "events": events})
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e), "events": []})
+
+        # ── Backup / Restore ──────────────────────────────────────────────────
+        @flask_app.route("/api/backup")
+        def api_backup():
+            if not srv._check_auth(): return _need_auth()
+            try:
+                import zipfile, io
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                    # Все файлы карт
+                    for name, tab in srv.app.tabs.items():
+                        if tab.file_path and os.path.exists(tab.file_path):
+                            zf.write(tab.file_path, os.path.basename(tab.file_path))
+                    # session.json
+                    sess_path = os.path.join(_HERE, "session.json")
+                    if os.path.exists(sess_path):
+                        zf.write(sess_path, "session.json")
+                    # SQLite история
+                    db_path = os.path.join(_HERE, "snmp_history.db")
+                    if os.path.exists(db_path):
+                        zf.write(db_path, "snmp_history.db")
+                buf.seek(0)
+                ts = time.strftime("%Y%m%d_%H%M%S")
+                return Response(
+                    buf.read(),
+                    mimetype="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename=netmap_backup_{ts}.zip"}
+                )
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)})
+
+        # ── Статистика для боковой панели ────────────────────────────────────
+        @flask_app.route("/api/summary")
+        def api_summary():
+            if not srv._check_auth(): return _need_auth()
+            try:
+                tab = srv.app.current_tab
+                if not tab:
+                    return jsonify({"ok": True, "data": {}})
+                from device import DeviceStatus
+                devs = list(tab.devices.values())
+                total_in_b  = 0.0
+                total_out_b = 0.0
+                latencies   = []
+                for d in devs:
+                    if d.latency is not None:
+                        latencies.append(d.latency)
+                    snmp = getattr(d, "snmp_last_info", None) or {}
+                    for k, v in snmp.items():
+                        lo = k.lower()
+                        try:
+                            n = float(str(v).split()[0])
+                            if "inoctets" in lo:  total_in_b  += n
+                            if "outoctets" in lo: total_out_b += n
+                        except (ValueError, TypeError):
+                            pass
+                def fmt_bytes(b):
+                    if b >= 1_073_741_824: return f"{b/1_073_741_824:.1f} GB"
+                    if b >= 1_048_576:     return f"{b/1_048_576:.1f} MB"
+                    if b >= 1024:          return f"{b/1024:.1f} KB"
+                    return f"{b:.0f} B"
+                return jsonify({"ok": True, "data": {
+                    "total_in":    fmt_bytes(total_in_b),
+                    "total_out":   fmt_bytes(total_out_b),
+                    "avg_latency": round(sum(latencies)/len(latencies), 1) if latencies else None,
+                    "max_latency": round(max(latencies), 1) if latencies else None,
+                    "devices_total":  len(devs),
+                    "devices_online": sum(1 for d in devs if d.status == DeviceStatus.ONLINE),
+                }})
+            except Exception as e:
+                return jsonify({"ok": False, "error": str(e)})
+
+        # ── Пользователи (роли admin/viewer) ────────────────────────────────
+        @flask_app.route("/api/users", methods=["GET"])
+        def api_users():
+            if not srv._check_auth(): return _need_auth()
+            token = request.cookies.get("nm_token", "")
+            sess  = _sessions.get(token, {})
+            role  = srv.users.get(sess.get("user", ""), {}).get("role", "viewer")
+            users = [{"username": u, "role": v["role"]}
+                     for u, v in srv.users.items()]
+            return jsonify({"ok": True, "users": users, "my_role": role})
+
+        @flask_app.route("/api/users", methods=["POST"])
+        def api_users_add():
+            if not srv._check_auth(): return _need_auth()
+            if not srv._is_admin(): return jsonify({"ok": False, "error": "Нет прав"}), 403
+            data = request.get_json(silent=True) or {}
+            uname = data.get("username", "").strip()
+            pw    = data.get("password", "")
+            role  = data.get("role", "viewer")
+            if not uname or len(pw) < 4:
+                return jsonify({"ok": False, "error": "Неверные данные"}), 400
+            srv.users[uname] = {"password": _hash_pw(pw), "role": role}
+            srv.credentials  = {u: v["password"] for u, v in srv.users.items()}
+            return jsonify({"ok": True})
+
+        @flask_app.route("/api/users/<uname>", methods=["DELETE"])
+        def api_users_del(uname):
+            if not srv._check_auth(): return _need_auth()
+            if not srv._is_admin(): return jsonify({"ok": False, "error": "Нет прав"}), 403
+            srv.users.pop(uname, None)
+            srv.credentials = {u: v["password"] for u, v in srv.users.items()}
+            return jsonify({"ok": True})
 
         return flask_app
 
@@ -333,7 +468,7 @@ class NetMapWebServer:
         tab = self._get_tab(tab_name)
         if not tab:
             return {"total": 0, "online": 0, "offline": 0,
-                    "unknown": 0, "updated": ""}
+                    "unknown": 0, "updated": "", "role": "viewer"}
         from device import DeviceStatus
         devs = list(tab.devices.values())
         return {
@@ -344,6 +479,7 @@ class NetMapWebServer:
             "unknown": sum(1 for d in devs if d.status not in
                           (DeviceStatus.ONLINE, DeviceStatus.OFFLINE)),
             "updated": time.strftime("%H:%M:%S"),
+            "role":    self._get_role(),
         }
 
 
