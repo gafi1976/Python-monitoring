@@ -233,6 +233,10 @@ class NetworkMapApp:
         self.result_queue = queue.Queue()
         self.conn_labels = ConnectionLabelManager()
 
+        # Режим соединения
+        self.connect_mode = False
+        self.connect_first = None
+
         # UI элементы
         self._build_ui()
         self._start_queue_processor()
@@ -466,6 +470,11 @@ class NetworkMapApp:
         tab = self.current_tab
         return tab.connections if tab else []
 
+    @connections.setter
+    def connections(self, val):
+        if self.current_tab:
+            self.current_tab.connections = val
+
     @property
     def canvas_offset(self) -> List[int]:
         tab = self.current_tab
@@ -501,7 +510,6 @@ class NetworkMapApp:
 
         for text, cmd, color in [
             ("➕ Добавить",    self._add_device,          C["accent2"]),
-            ("🔗 Соединить",   self._toggle_connect_mode, C["accent"]),
             ("✂️ Разъединить", self._disconnect_selected, C["warning"]),
             ("🗑 Удалить",     self._delete_selected,     C["danger"]),
         ]:
@@ -510,6 +518,14 @@ class NetworkMapApp:
                       activebackground=C["border"], activeforeground=color,
                       relief="flat", bd=0, font=("Consolas", 10),
                       padx=12, pady=6, cursor="hand2").pack(side="left", padx=4, pady=8)
+
+        self.btn_connect = tk.Button(tb, text="🔗 Соединить",
+                      command=self._toggle_connect_mode,
+                      bg=C["bg3"], fg=C["accent"],
+                      activebackground=C["border"], activeforeground=C["accent"],
+                      relief="flat", bd=0, font=("Consolas", 10),
+                      padx=12, pady=6, cursor="hand2")
+        self.btn_connect.pack(side="left", padx=4, pady=8)
 
         # Кнопка сканирования
         tk.Button(tb, text="🔍 Сканировать сеть",
@@ -842,7 +858,7 @@ class NetworkMapApp:
 
     def _on_canvas_click(self, event):
         dev_id = self._get_device_at(event.x, event.y)
-        if hasattr(self, 'connect_mode') and self.connect_mode:
+        if self.connect_mode:
             if dev_id:
                 if self.connect_first is None:
                     self.connect_first = dev_id
@@ -851,7 +867,7 @@ class NetworkMapApp:
                     conn, rev = (self.connect_first, dev_id), (dev_id, self.connect_first)
                     if conn not in self.connections and rev not in self.connections:
                         self._snapshot()
-                        self.connections.append(conn)
+                        self.connections = self.connections + [conn]
                     self.connect_first = None
                     self._toggle_connect_mode()
                     self._draw_all()
@@ -1020,10 +1036,15 @@ class NetworkMapApp:
     def _toggle_connect_mode(self):
         self.connect_mode = not self.connect_mode
         self.connect_first = None
+        C = COLORS
         if self.connect_mode:
             self.connect_label.place(relx=0.5, y=8, anchor="n")
+            self.btn_connect.config(bg=C["accent"], fg=C["bg"])
+            self._set_status("🔗 Режим соединения: кликните на первое устройство")
         else:
             self.connect_label.place_forget()
+            self.btn_connect.config(bg=C["bg3"], fg=C["accent"])
+            self._set_status("Готово")
 
     def _disconnect_selected(self):
         if hasattr(self, 'selected_device') and self.selected_device:
