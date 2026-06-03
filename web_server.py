@@ -181,17 +181,33 @@ class NetMapWebServer:
         }
 
     def _history(self, dev_id):
-        """История SNMP метрик для графика. Принимает ?limit=N из запроса."""
+        """История SNMP метрик. Принимает ?period=5m|10m|1h|1d|1mo или ?start_ts=unix."""
         try:
             from flask import request
-            limit = int(request.args.get('limit', 60))
-            limit = max(10, min(limit, 500))
             import reporter
+
+            # Определяем временной диапазон по периоду
+            period = request.args.get('period', '1h')
+            now    = time.time()
+            period_map = {
+                '5m':  5   * 60,
+                '10m': 10  * 60,
+                '1h':  3600,
+                '1d':  86400,
+                '1mo': 86400 * 30,
+            }
+            seconds   = period_map.get(period, 3600)
+            start_ts  = float(request.args.get('start_ts', now - seconds))
+            # Лимит точек зависит от периода — больше период, больше точек
+            limit_map = {'5m': 100, '10m': 120, '1h': 200, '1d': 500, '1mo': 500}
+            limit = int(request.args.get('limit', limit_map.get(period, 200)))
+            limit = max(10, min(limit, 1000))
+
             names = reporter.history_db.get_all_metric_names(dev_id)
             result = {}
             for name in names:
                 rows = reporter.history_db.get_metrics_for_device(
-                    dev_id, metric_name=name, limit=limit
+                    dev_id, metric_name=name, start_ts=start_ts, limit=limit
                 )
                 pts = []
                 for r in rows:
@@ -201,7 +217,7 @@ class NetMapWebServer:
                 if pts:
                     pts.sort(key=lambda x: x["ts"])
                     result[name] = pts
-            return {"ok": True, "metrics": result}
+            return {"ok": True, "metrics": result, "period": period}
         except Exception as e:
             return {"ok": False, "error": str(e), "metrics": {}}
 

@@ -105,6 +105,16 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
   display:block; border-radius:4px;
   background:#0d1020; border:1px solid #2d2d44;
 }
+#tip-periods {
+  display:flex; gap:4px; margin-bottom:6px; flex-wrap:wrap;
+}
+.tip-period-btn {
+  background:#2d2d44; border:1px solid #444466; color:#b0b0d0;
+  padding:2px 8px; border-radius:4px; cursor:pointer;
+  font-size:11px; font-family:inherit; transition:all 0.15s;
+}
+.tip-period-btn:hover  { background:#444466; color:#fff; }
+.tip-period-btn.active { background:#ffb86c; color:#1a1a2e; border-color:#ffb86c; font-weight:bold; }
 /* ── Intervals modal ── */
 #modal-overlay {
   display:none; position:fixed; inset:0;
@@ -165,8 +175,15 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
 <div id="tip">
   <div id="tip-info"></div>
   <div id="tip-chart-wrap">
+    <div id="tip-periods">
+      <button class="tip-period-btn active" data-period="5m">5м</button>
+      <button class="tip-period-btn" data-period="10m">10м</button>
+      <button class="tip-period-btn" data-period="1h">1ч</button>
+      <button class="tip-period-btn" data-period="1d">1д</button>
+      <button class="tip-period-btn" data-period="1mo">1мес</button>
+    </div>
     <div id="tip-chart-title"></div>
-    <canvas id="tip-chart" width="240" height="80"></canvas>
+    <canvas id="tip-chart" width="260" height="90"></canvas>
   </div>
 </div>
 
@@ -249,7 +266,7 @@ document.getElementById('btn-modal-ok').addEventListener('click', function(){
   CFG.mapInterval  = parseInt(document.getElementById('rng-map').value) * 1000;
   CFG.tipDelay     = parseInt(document.getElementById('rng-tip').value);
   CFG.historyLimit = parseInt(document.getElementById('rng-pts').value);
-  tipHistory = {};  // сбрасываем кэш — будет загружено с новым лимитом
+  tipHistory = {};  // сбрасываем весь кэш
   applyMapInterval();
   document.getElementById('modal-overlay').classList.remove('open');
 });
@@ -557,9 +574,29 @@ function devAt(cx,cy){
 }
 
 // ── Tooltip с мини-графиком ───────────────────────────────────────────────────
-var tipDevId   = null;   // id устройства в тултипе сейчас
-var tipHistory = {};     // кэш истории: devId -> {metrics}
-var tipTimer   = null;   // таймер задержки загрузки
+var tipDevId    = null;   // id устройства в тултипе сейчас
+var tipHistory  = {};     // кэш: "devId:period" -> metrics
+var tipTimer    = null;   // таймер задержки загрузки
+var tipPeriod   = '5m';   // текущий выбранный период
+
+// Кнопки периода — привязываем обработчики
+document.querySelectorAll('.tip-period-btn').forEach(function(btn) {
+  btn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var period = this.getAttribute('data-period');
+    if (period === tipPeriod) return;
+    tipPeriod = period;
+    // Переключаем active-класс
+    document.querySelectorAll('.tip-period-btn').forEach(function(b) {
+      b.classList.toggle('active', b.getAttribute('data-period') === period);
+    });
+    // Перегружаем график для текущего устройства с новым периодом
+    if (tipDevId) {
+      document.getElementById('tip-chart-title').textContent = 'Загрузка...';
+      loadTipHistory(tipDevId, true);  // true = force reload
+    }
+  });
+});
 
 function showTooltip(e) {
   var tip = document.getElementById('tip');
@@ -613,23 +650,25 @@ function showTooltip(e) {
   }
 }
 
-function loadTipHistory(devId) {
-  if (tipHistory[devId]) {
-    drawTipChart(devId, tipHistory[devId]);
+function loadTipHistory(devId, forceReload) {
+  var cacheKey = devId + ':' + tipPeriod;
+  if (!forceReload && tipHistory[cacheKey]) {
+    drawTipChart(devId, tipHistory[cacheKey]);
     return;
   }
-  fetch('/api/history/' + encodeURIComponent(devId) + '?limit=' + CFG.historyLimit)
+  fetch('/api/history/' + encodeURIComponent(devId) + '?period=' + tipPeriod)
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok && data.metrics) {
-        tipHistory[devId] = data.metrics;
-        // Показываем только если устройство всё ещё под курсором
+        tipHistory[cacheKey] = data.metrics;
         if (tipDevId === devId) {
           drawTipChart(devId, data.metrics);
         }
       }
     })
-    .catch(function() {});
+    .catch(function() {
+      document.getElementById('tip-chart-title').textContent = 'Ошибка загрузки';
+    });
 }
 
 function drawTipChart(devId, metrics) {
@@ -765,6 +804,14 @@ function fmtTime(ts) {
   var d = new Date(ts * 1000);
   var h = ('0'+d.getHours()).slice(-2);
   var m = ('0'+d.getMinutes()).slice(-2);
+  // Для периодов больше суток показываем дату
+  if (tipPeriod === '1d' || tipPeriod === '1mo') {
+    var day = ('0'+d.getDate()).slice(-2);
+    var mon = ('0'+(d.getMonth()+1)).slice(-2);
+    return tipPeriod === '1mo'
+      ? day+'.'+mon
+      : day+'.'+mon+' '+h+':'+m;
+  }
   return h + ':' + m;
 }
 
