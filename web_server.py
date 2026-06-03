@@ -112,6 +112,10 @@ class NetMapWebServer:
         def api_stats_tab(tab_name):
             return jsonify(srv._stats(tab_name))
 
+        @flask_app.route("/api/history/<dev_id>")
+        def api_history(dev_id):
+            return jsonify(srv._history(dev_id))
+
         return flask_app
 
     # ── Data helpers ──────────────────────────────────────────────────────────
@@ -175,6 +179,30 @@ class NetMapWebServer:
             "connections": connections,
             "labels":      labels,
         }
+
+    def _history(self, dev_id):
+        """История SNMP метрик для графика. Возвращает все числовые метрики."""
+        try:
+            import reporter
+            # Получаем все имена метрик устройства
+            names = reporter.history_db.get_all_metric_names(dev_id)
+            result = {}
+            for name in names:
+                rows = reporter.history_db.get_metrics_for_device(
+                    dev_id, metric_name=name, limit=60
+                )
+                # Берём только числовые значения, сортируем по времени
+                pts = []
+                for r in rows:
+                    ts, mn, raw, num, unit = r
+                    if num is not None:
+                        pts.append({"ts": ts, "v": num, "unit": unit or ""})
+                if pts:
+                    pts.sort(key=lambda x: x["ts"])
+                    result[name] = pts
+            return {"ok": True, "metrics": result}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "metrics": {}}
 
     def _stats(self, tab_name):
         tab = self._get_tab(tab_name)

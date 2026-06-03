@@ -90,9 +90,20 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
 /* ── Tooltip ── */
 #tip {
   position:fixed; pointer-events:none; display:none;
-  background:#1e2233; border:1px solid #ffb86c; border-radius:5px;
-  padding:7px 11px; font-size:12px; z-index:20;
-  max-width:240px; line-height:1.6;
+  background:#1a1e33; border:1px solid #444466; border-radius:8px;
+  padding:10px 13px; font-size:12px; z-index:20;
+  min-width:200px; max-width:300px; line-height:1.7;
+  box-shadow:0 6px 24px rgba(0,0,0,0.6);
+}
+#tip-chart-wrap {
+  margin-top:8px; display:none;
+}
+#tip-chart-title {
+  font-size:11px; color:#b0b0d0; margin-bottom:4px;
+}
+#tip-chart {
+  display:block; border-radius:4px;
+  background:#0d1020; border:1px solid #2d2d44;
 }
 </style>
 </head>
@@ -121,7 +132,13 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
   <div id="det"><p style="color:#555;padding:8px">Click a device</p></div>
 </div>
 
-<div id="tip"></div>
+<div id="tip">
+  <div id="tip-info"></div>
+  <div id="tip-chart-wrap">
+    <div id="tip-chart-title"></div>
+    <canvas id="tip-chart" width="240" height="80"></canvas>
+  </div>
+</div>
 
 <script>
 // ── Константы ────────────────────────────────────────────────────────────────
@@ -422,17 +439,217 @@ function devAt(cx,cy){
   return null;
 }
 
-function showTooltip(e){
-  var tip=document.getElementById('tip'), d=devAt(e.offsetX,e.offsetY);
-  if (d){
-    var sc=STATUS_COLOR[d.status]||'#8be9fd';
-    var html='<b>'+escHtml(d.name)+'</b><br>'+d.ip+'<br>'
-            +'Status: <span style="color:'+sc+'">'+d.status+'</span>';
-    if (d.latency!=null) html+='<br>Ping: '+d.latency.toFixed(1)+' ms';
-    if (d.last_checked)  html+='<br>'+d.last_checked;
-    tip.innerHTML=html; tip.style.display='block';
-    tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY-10)+'px';
-  } else { tip.style.display='none'; }
+// ── Tooltip с мини-графиком ───────────────────────────────────────────────────
+var tipDevId   = null;   // id устройства в тултипе сейчас
+var tipHistory = {};     // кэш истории: devId -> {metrics}
+var tipTimer   = null;   // таймер задержки загрузки
+
+function showTooltip(e) {
+  var tip = document.getElementById('tip');
+  var d   = devAt(e.offsetX, e.offsetY);
+
+  if (!d) {
+    tip.style.display = 'none';
+    tipDevId = null;
+    if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; }
+    return;
+  }
+
+  // Базовая информация — показываем сразу
+  var sc   = STATUS_COLOR[d.status] || '#8be9fd';
+  var html = '<b>' + escHtml(d.name) + '</b><br>'
+           + d.ip + '<br>'
+           + 'Status: <span style="color:' + sc + '">' + d.status + '</span>';
+  if (d.latency != null) html += '<br>Ping: ' + d.latency.toFixed(1) + ' ms';
+  if (d.last_checked)    html += '<br>' + d.last_checked;
+
+  // SNMP текущие значения
+  if (d.snmp_info) {
+    Object.keys(d.snmp_info).forEach(function(k) {
+      var lo = k.toLowerCase();
+      var isTemp = lo.indexOf('temp') !== -1 || lo.indexOf('sensor') !== -1;
+      if (isTemp) {
+        html += '<br><span style="color:#f1fa8c">🌡 ' + escHtml(k) + ': '
+              + escHtml(String(d.snmp_info[k])) + '</span>';
+      }
+    });
+  }
+
+  document.getElementById('tip-info').innerHTML = html;
+  tip.style.display = 'block';
+
+  // Позиция тултипа
+  var tx = e.clientX + 16, ty = e.clientY - 10;
+  if (tx + 310 > window.innerWidth)  tx = e.clientX - 310;
+  if (ty + 200 > window.innerHeight) ty = e.clientY - 200;
+  tip.style.left = tx + 'px';
+  tip.style.top  = ty + 'px';
+
+  // Если устройство сменилось — загружаем историю с задержкой 400ms
+  if (d.id !== tipDevId) {
+    tipDevId = d.id;
+    document.getElementById('tip-chart-wrap').style.display = 'none';
+    if (tipTimer) clearTimeout(tipTimer);
+    tipTimer = setTimeout(function() {
+      loadTipHistory(d.id, e);
+    }, 400);
+  }
+}
+
+function loadTipHistory(devId, e) {
+  // Если кэш есть — используем сразу
+  if (tipHistory[devId]) {
+    drawTipChart(devId, tipHistory[devId]);
+    return;
+  }
+  fetch('/api/history/' + encodeURIComponent(devId))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok && data.metrics) {
+        tipHistory[devId] = data.metrics;
+        // Показываем только если устройство всё ещё под курсором
+        if (tipDevId === devId) {
+          drawTipChart(devId, data.metrics);
+        }
+      }
+    })
+    .catch(function() {});
+}
+
+function drawTipChart(devId, metrics) {
+  // Ищем температурные метрики
+  var tempKeys = Object.keys(metrics).filter(function(k) {
+    var lo = k.toLowerCase();
+    return lo.indexOf('temp') !== -1 || lo.indexOf('sensor') !== -1
+        || lo.indexOf('celsius') !== -1;
+  });
+
+  // Если нет температуры — берём любую числовую метрику (первую)
+  var chartKey = null, chartLabel = '';
+  if (tempKeys.length > 0) {
+    chartKey   = tempKeys[0];
+    chartLabel = '🌡 ' + chartKey;
+  } else {
+    var allKeys = Object.keys(metrics);
+    if (allKeys.length > 0) {
+      chartKey   = allKeys[0];
+      chartLabel = '📊 ' + chartKey;
+    }
+  }
+
+  if (!chartKey) return;
+
+  var pts  = metrics[chartKey];
+  var unit = pts.length ? pts[0].unit : '';
+  var vals = pts.map(function(p) { return p.v; });
+  var times = pts.map(function(p) { return p.ts; });
+
+  // Показываем блок
+  var wrap = document.getElementById('tip-chart-wrap');
+  wrap.style.display = 'block';
+  document.getElementById('tip-chart-title').textContent =
+    chartLabel + (unit ? '  (' + unit + ')' : '');
+
+  // Рисуем график
+  var cv  = document.getElementById('tip-chart');
+  var cx  = cv.getContext('2d');
+  var W   = cv.width, H = cv.height;
+  cx.clearRect(0, 0, W, H);
+
+  if (vals.length < 2) {
+    cx.fillStyle = '#666';
+    cx.font = '11px Consolas';
+    cx.textAlign = 'center';
+    cx.textBaseline = 'middle';
+    cx.fillText('Недостаточно данных', W/2, H/2);
+    return;
+  }
+
+  var minV = Math.min.apply(null, vals);
+  var maxV = Math.max.apply(null, vals);
+  if (maxV === minV) { minV -= 1; maxV += 1; }
+  var pad = { l:34, r:8, t:8, b:18 };
+  var gW  = W - pad.l - pad.r;
+  var gH  = H - pad.t - pad.b;
+
+  // Фон
+  cx.fillStyle = '#0d1020';
+  cx.fillRect(0, 0, W, H);
+
+  // Горизонтальные линии сетки (3 шт)
+  cx.strokeStyle = '#2a2a3a'; cx.lineWidth = 1;
+  for (var gi = 0; gi <= 2; gi++) {
+    var gy = pad.t + (gi / 2) * gH;
+    cx.beginPath(); cx.moveTo(pad.l, gy); cx.lineTo(W - pad.r, gy); cx.stroke();
+    // Подписи Y
+    var yVal = maxV - (gi / 2) * (maxV - minV);
+    cx.fillStyle = '#666'; cx.font = '9px Consolas';
+    cx.textAlign = 'right'; cx.textBaseline = 'middle';
+    cx.fillText(yVal.toFixed(1), pad.l - 3, gy);
+  }
+
+  // Градиент заливки под линией
+  var grad = cx.createLinearGradient(0, pad.t, 0, pad.t + gH);
+  // Цвет зависит от типа метрики
+  var isTemp = chartKey.toLowerCase().indexOf('temp') !== -1
+            || chartKey.toLowerCase().indexOf('sensor') !== -1;
+  var lineColor   = isTemp ? '#f1fa8c' : '#50fa7b';
+  var gradColor   = isTemp ? 'rgba(241,250,140,' : 'rgba(80,250,123,';
+  grad.addColorStop(0,   gradColor + '0.35)');
+  grad.addColorStop(1,   gradColor + '0.02)');
+
+  // Путь линии
+  cx.beginPath();
+  vals.forEach(function(v, i) {
+    var px = pad.l + (i / (vals.length - 1)) * gW;
+    var py = pad.t + (1 - (v - minV) / (maxV - minV)) * gH;
+    if (i === 0) cx.moveTo(px, py); else cx.lineTo(px, py);
+  });
+
+  // Заливка под линией
+  cx.lineTo(pad.l + gW, pad.t + gH);
+  cx.lineTo(pad.l,      pad.t + gH);
+  cx.closePath();
+  cx.fillStyle = grad;
+  cx.fill();
+
+  // Сама линия
+  cx.beginPath();
+  vals.forEach(function(v, i) {
+    var px = pad.l + (i / (vals.length - 1)) * gW;
+    var py = pad.t + (1 - (v - minV) / (maxV - minV)) * gH;
+    if (i === 0) cx.moveTo(px, py); else cx.lineTo(px, py);
+  });
+  cx.strokeStyle = lineColor; cx.lineWidth = 1.5;
+  cx.stroke();
+
+  // Точка последнего значения
+  var lastX = pad.l + gW;
+  var lastY = pad.t + (1 - (vals[vals.length-1] - minV) / (maxV - minV)) * gH;
+  cx.beginPath(); cx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+  cx.fillStyle = lineColor; cx.fill();
+
+  // Подпись последнего значения
+  cx.fillStyle = lineColor; cx.font = 'bold 9px Consolas';
+  cx.textAlign = 'right'; cx.textBaseline = 'bottom';
+  cx.fillText(vals[vals.length-1].toFixed(1) + (unit ? ' ' + unit : ''),
+              W - pad.r, pad.t + gH - 2);
+
+  // Ось X — время первой и последней точки
+  if (times.length >= 2) {
+    cx.fillStyle = '#555'; cx.font = '8px Consolas';
+    cx.textAlign = 'left';  cx.textBaseline = 'top';
+    cx.fillText(fmtTime(times[0]), pad.l, H - pad.b + 3);
+    cx.textAlign = 'right';
+    cx.fillText(fmtTime(times[times.length-1]), W - pad.r, H - pad.b + 3);
+  }
+}
+
+function fmtTime(ts) {
+  var d = new Date(ts * 1000);
+  var h = ('0'+d.getHours()).slice(-2);
+  var m = ('0'+d.getMinutes()).slice(-2);
+  return h + ':' + m;
 }
 
 function handleClick(e){
