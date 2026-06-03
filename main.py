@@ -262,6 +262,15 @@ class NetworkMapApp:
         self.result_queue = queue.Queue()
         self.conn_labels = ConnectionLabelManager()
 
+        # Runtime состояние холста
+        self.connect_mode: bool = False
+        self.connect_first: Optional[str] = None
+        self.selected_device: Optional[str] = None
+        self.drag_device: Optional[str] = None
+        self.drag_offset: tuple = (0, 0)
+        self.pan_start: Optional[tuple] = None
+        self._icon_refs: list = []
+
         # UI элементы
         self._build_ui()
         self._start_queue_processor()
@@ -771,7 +780,7 @@ class NetworkMapApp:
                 DeviceStatus.CHECKING: C["checking"],
             }.get(dev.status, C["unknown"])
 
-            is_sel = (dev_id == getattr(self, 'selected_device', None))
+            is_sel = (dev_id == self.selected_device)
             if is_sel:
                 self.canvas.create_oval(x-sz-6, y-sz-6, x+sz+6, y+sz+6,
                                         fill="", outline=C["accent"], width=2)
@@ -898,7 +907,7 @@ class NetworkMapApp:
 
     def _on_canvas_click(self, event):
         dev_id = self._get_device_at(event.x, event.y)
-        if hasattr(self, 'connect_mode') and self.connect_mode:
+        if self.connect_mode:
             if dev_id:
                 if self.connect_first is None:
                     self.connect_first = dev_id
@@ -926,12 +935,12 @@ class NetworkMapApp:
         self._draw_all()
 
     def _on_canvas_drag(self, event):
-        if hasattr(self, 'drag_device') and self.drag_device:
+        if self.drag_device:
             dev = self.devices[self.drag_device]
             dev.x = event.x - self.drag_offset[0] - self.canvas_offset[0]
             dev.y = event.y - self.drag_offset[1] - self.canvas_offset[1]
             self._draw_all()
-        elif hasattr(self, 'pan_start') and self.pan_start:
+        elif self.pan_start:
             dx, dy = event.x - self.pan_start[0], event.y - self.pan_start[1]
             self.canvas_offset[0] += dx
             self.canvas_offset[1] += dy
@@ -939,7 +948,7 @@ class NetworkMapApp:
             self._draw_all()
 
     def _on_canvas_release(self, event):
-        if hasattr(self, 'drag_device') and self.drag_device:
+        if self.drag_device:
             self._snapshot()
         self.drag_device = self.pan_start = None
 
@@ -1071,7 +1080,7 @@ class NetworkMapApp:
         self._open_device_settings(dev_id)
 
     def _delete_selected(self):
-        if hasattr(self, 'selected_device') and self.selected_device:
+        if self.selected_device:
             self._delete_device(self.selected_device)
 
     def _delete_device(self, dev_id: str):
@@ -1101,7 +1110,7 @@ class NetworkMapApp:
         tab = self.current_tab
         if not tab:
             return
-        if hasattr(self, 'selected_device') and self.selected_device:
+        if self.selected_device:
             dev_id = self.selected_device
             new_conns = [(a, b) for (a, b) in tab.connections
                          if a != dev_id and b != dev_id]
