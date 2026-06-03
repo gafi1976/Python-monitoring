@@ -230,6 +230,52 @@ function draw() {
     ctx.font      = '9px Consolas';
     ctx.fillStyle = '#b0b0d0';
     ctx.fillText(d.ip, x, y + sz + 25);
+
+    // ── SNMP-метрики под устройством ──────────────────────────────────────
+    var snmp = d.snmp_info;
+    if (snmp && Object.keys(snmp).length > 0) {
+      var entries = Object.keys(snmp).map(function(k) {
+        var v = String(snmp[k]);
+        if (v.length > 18) v = v.substring(0, 16) + '…';
+        return k + ': ' + v;
+      });
+
+      // Ширина блока по самой длинной строке
+      ctx.font = '8px Consolas';
+      var bpad = 5, lineH = 14;
+      var maxW = 0;
+      entries.forEach(function(e) {
+        var w = ctx.measureText(e).width;
+        if (w > maxW) maxW = w;
+      });
+
+      var boxW = maxW + bpad * 2;
+      var boxH = entries.length * lineH + bpad * 2 + 14; // +14 для заголовка
+      var bx   = x - boxW / 2;
+      var by   = y + sz + 34; // начало блока под IP
+
+      // Фон
+      ctx.fillStyle   = '#0d1a0d';
+      ctx.strokeStyle = '#264f78';
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.rect(bx, by, boxW, boxH);
+      ctx.fill();
+      ctx.stroke();
+
+      // Заголовок "── SNMP ──"
+      ctx.font      = '8px Consolas';
+      ctx.fillStyle = '#264f78';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('── SNMP ──', x, by + 7);
+
+      // Строки метрик
+      ctx.fillStyle = '#ffb454';
+      entries.forEach(function(e, i) {
+        ctx.fillText(e, x, by + 14 + bpad + i * lineH + lineH / 2);
+      });
+    }
   });
 }
 
