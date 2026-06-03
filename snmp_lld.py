@@ -121,6 +121,84 @@ LLD_TEMPLATES: dict[str, dict] = {
             {"label": "SensorTemp [{idx}]", "oid_tpl": "1.3.6.1.2.1.99.1.1.1.4.{idx}", "unit": "°C", "factor": 1.0},
         ],
     },
+    # ── Cisco IOS ──────────────────────────────────────────────────────────────
+    "cisco_cpu": {
+        "label":    "Cisco — CPU (avgBusy)",
+        "icon":     "🔵",
+        "walk_oid": "1.3.6.1.4.1.9.2.1.57",
+        "macros": [
+            {"macro": "{#SNMPINDEX}", "oid_tpl": None, "note": "Индекс CPU"},
+        ],
+        "metrics": [
+            {"label": "Cisco CPU 1min [{idx}]", "oid_tpl": "1.3.6.1.4.1.9.2.1.57.{idx}", "unit": "%", "factor": 1.0},
+            {"label": "Cisco CPU 5min [{idx}]", "oid_tpl": "1.3.6.1.4.1.9.2.1.58.{idx}", "unit": "%", "factor": 1.0},
+        ],
+    },
+    "cisco_memory": {
+        "label":    "Cisco — память (ciscoMemoryPool)",
+        "icon":     "🔵",
+        "walk_oid": "1.3.6.1.4.1.9.9.48.1.1.1.2",
+        "macros": [
+            {"macro": "{#SNMPINDEX}", "oid_tpl": None,                                 "note": "Индекс пула"},
+            {"macro": "{#POOLNAME}", "oid_tpl": "1.3.6.1.4.1.9.9.48.1.1.1.2.{idx}", "note": "Имя пула"},
+        ],
+        "metrics": [
+            {"label": "Cisco MemUsed [{iface}]", "oid_tpl": "1.3.6.1.4.1.9.9.48.1.1.1.5.{idx}", "unit": "B", "factor": 1.0},
+            {"label": "Cisco MemFree [{iface}]", "oid_tpl": "1.3.6.1.4.1.9.9.48.1.1.1.6.{idx}", "unit": "B", "factor": 1.0},
+        ],
+    },
+    "cisco_env": {
+        "label":    "Cisco — среда (температура ciscoEnvMon)",
+        "icon":     "🔵",
+        "walk_oid": "1.3.6.1.4.1.9.9.13.1.3.1.2",
+        "macros": [
+            {"macro": "{#SNMPINDEX}", "oid_tpl": None,                                 "note": "Индекс датчика"},
+            {"macro": "{#DESCR}",    "oid_tpl": "1.3.6.1.4.1.9.9.13.1.3.1.2.{idx}", "note": "Описание"},
+        ],
+        "metrics": [
+            {"label": "Cisco Temp [{iface}]",  "oid_tpl": "1.3.6.1.4.1.9.9.13.1.3.1.3.{idx}", "unit": "°C", "factor": 1.0},
+            {"label": "Cisco TempSt [{iface}]","oid_tpl": "1.3.6.1.4.1.9.9.13.1.3.1.6.{idx}", "unit": "",   "factor": 1.0},
+        ],
+    },
+    # ── MikroTik ───────────────────────────────────────────────────────────────
+    "mikrotik_cpu": {
+        "label":    "MikroTik — CPU",
+        "icon":     "🟠",
+        "walk_oid": "1.3.6.1.2.1.25.3.3.1.2",
+        "macros": [
+            {"macro": "{#SNMPINDEX}", "oid_tpl": None, "note": "Индекс CPU"},
+        ],
+        "metrics": [
+            {"label": "MT CPU [{idx}] %", "oid_tpl": "1.3.6.1.2.1.25.3.3.1.2.{idx}", "unit": "%", "factor": 1.0},
+        ],
+    },
+    "mikrotik_interfaces": {
+        "label":    "MikroTik — интерфейсы (mtxrInterfaceStats)",
+        "icon":     "🟠",
+        "walk_oid": "1.3.6.1.4.1.14988.1.1.14.1.1.2",
+        "macros": [
+            {"macro": "{#SNMPINDEX}", "oid_tpl": None,                                         "note": "Индекс"},
+            {"macro": "{#IFNAME}",   "oid_tpl": "1.3.6.1.4.1.14988.1.1.14.1.1.2.{idx}",      "note": "Имя"},
+        ],
+        "metrics": [
+            {"label": "MT TxBytes [{iface}]", "oid_tpl": "1.3.6.1.4.1.14988.1.1.14.1.1.8.{idx}",  "unit": "B", "factor": 1.0},
+            {"label": "MT RxBytes [{iface}]", "oid_tpl": "1.3.6.1.4.1.14988.1.1.14.1.1.7.{idx}",  "unit": "B", "factor": 1.0},
+            {"label": "MT TxDrop [{iface}]",  "oid_tpl": "1.3.6.1.4.1.14988.1.1.14.1.1.14.{idx}", "unit": "",  "factor": 1.0},
+            {"label": "MT RxDrop [{iface}]",  "oid_tpl": "1.3.6.1.4.1.14988.1.1.14.1.1.13.{idx}", "unit": "",  "factor": 1.0},
+        ],
+    },
+    "mikrotik_health": {
+        "label":    "MikroTik — здоровье (mtxrHlTable)",
+        "icon":     "🟠",
+        "walk_oid": "1.3.6.1.4.1.14988.1.1.3.100.1.2",
+        "macros": [
+            {"macro": "{#SNMPINDEX}", "oid_tpl": None,                                      "note": "Индекс"},
+            {"macro": "{#HLNAME}",   "oid_tpl": "1.3.6.1.4.1.14988.1.1.3.100.1.2.{idx}", "note": "Параметр"},
+        ],
+        "metrics": [
+            {"label": "MT Health [{iface}]", "oid_tpl": "1.3.6.1.4.1.14988.1.1.3.100.1.3.{idx}", "unit": "", "factor": 1.0},
+        ],
+    },
 }
 
 
@@ -255,7 +333,30 @@ class LLDEngine:
         if not idx_map:
             return []
 
-        # ── Шаг 2: bulk-walk всех колонок макросов за один проход ────────────
+        # ── Фильтр: для net_interfaces — только UP-интерфейсы ────────────────
+        if rule_key == "net_interfaces":
+            oper_status_oid = "1.3.6.1.2.1.2.2.1.8"
+            oper_rows = _snmp_walk_sync(device.ip, device.snmp_community,
+                                        device.snmp_port, device.snmp_version,
+                                        oper_status_oid)
+            oper_map = {}
+            for suffix, val in oper_rows:
+                m = re.match(r"^(\d+)", suffix)
+                if m:
+                    oper_map[m.group(1)] = str(val).strip()
+            # operStatus 1 = up, 2 = down, другое = другое
+            filtered_idx = {}
+            for idx, name in idx_map.items():
+                status = oper_map.get(idx, "1")
+                try:
+                    if int(status) == 1:
+                        filtered_idx[idx] = name
+                    else:
+                        # Оставляем но помечаем как down
+                        filtered_idx[idx] = f"{name} [DOWN]"
+                except ValueError:
+                    filtered_idx[idx] = name
+            idx_map = filtered_idx
         # Собираем уникальные базовые OID колонок (без .{idx})
         col_walks: dict[str, dict[str, str]] = {}  # base_oid -> {idx -> value}
         mac_defs = tmpl.get("macros", [])
@@ -504,6 +605,10 @@ class LLDDialog:
                                   foreground=C.get("text_dim", "#888888"))
         self._tree.tag_configure("metric", font=("Consolas", 9),
                                   foreground=C.get("online", "#50fa7b"))
+        self._tree.tag_configure("parent_down", font=("Consolas", 9, "bold"),
+                                  foreground=C.get("offline", "#ff5555"))
+        self._tree.tag_configure("macro_down",  font=("Consolas", 9),
+                                  foreground=C.get("danger", "#ff5555"))
 
         # Counter label
         self._count_lbl = tk.Label(self.win,
@@ -636,15 +741,17 @@ class LLDDialog:
                             if idx not in seen_idx:
                                 # Родительская строка — сам объект
                                 parent_text = f"{tmpl['icon']} {inst}"
+                                is_down = "[DOWN]" in inst
+                                parent_tag = "parent_down" if is_down else "parent"
                                 parent_iid = self._tree.insert(
                                     "", "end",
                                     text="▶",
                                     values=(
                                         parent_text,
                                         hw,
-                                        f"{tmpl['label']} · индекс {idx}",
+                                        f"{tmpl['label']} · индекс {idx}" + (" ⚠ DOWN" if is_down else ""),
                                     ),
-                                    tags=(rule_key, "parent"),
+                                    tags=(rule_key, parent_tag),
                                     open=False,
                                 )
                                 seen_idx[idx] = parent_iid

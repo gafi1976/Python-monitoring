@@ -24,6 +24,35 @@ from collections import deque
 from tkinter import filedialog
 from snmp_lld import LLDDialog
 from connection_label import ConnectionLabelManager, ConnectionLabelDialog
+
+# Кэш PNG-иконок устройств
+_PNG_ICON_CACHE: dict[str, object] = {}
+
+def _load_png_icon(path: str, size: int = 40):
+    """Загружает PNG и масштабирует до size×size. Возвращает PhotoImage или None."""
+    if not path or not os.path.isfile(path):
+        return None
+    cache_key = f"{path}@{size}"
+    if cache_key in _PNG_ICON_CACHE:
+        return _PNG_ICON_CACHE[cache_key]
+    try:
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(path).convert("RGBA").resize((size, size))
+            photo = ImageTk.PhotoImage(img)
+        except ImportError:
+            # Без Pillow — пробуем нативный Tkinter (только GIF/PNG без масштаба)
+            photo = tk.PhotoImage(file=path)
+            # Простое масштабирование через subsample/zoom (грубое)
+            w, h = photo.width(), photo.height()
+            if w > 0 and h > 0:
+                factor = max(1, max(w, h) // size)
+                photo = photo.subsample(factor, factor)
+        _PNG_ICON_CACHE[cache_key] = photo
+        return photo
+    except Exception as e:
+        print(f"[Icon] не удалось загрузить {path}: {e}")
+        return None
     
 
 # ── pysnmp 7.x asyncio API ───────────────────────────────────────────────────
@@ -233,6 +262,15 @@ class NetworkMapApp:
         self.result_queue = queue.Queue()
         self.conn_labels = ConnectionLabelManager()
 
+        # Runtime состояние холста
+        self.connect_mode: bool = False
+        self.connect_first: Optional[str] = None
+        self.selected_device: Optional[str] = None
+        self.drag_device: Optional[str] = None
+        self.drag_offset: tuple = (0, 0)
+        self.pan_start: Optional[tuple] = None
+        self._icon_refs: list = []
+
         # UI элементы
         self._build_ui()
         self._start_queue_processor()
@@ -246,6 +284,9 @@ class NetworkMapApp:
         self._draw_all()
         self.root.bind('<Control-z>', self._undo)
         self.root.bind('<Control-Z>', self._undo)
+
+        # Запуск фонового опроса SNMP-метрик на линиях
+        self.conn_labels.start_polling(self)
 
     def _open_lld_for(self, dev_id: str):
         tab = self.current_tab
@@ -651,6 +692,8 @@ class NetworkMapApp:
         self.canvas.bind("<Button-2>",        self._on_pan_start)
         self.canvas.bind("<B2-Motion>",       self._on_pan_drag)
         self.canvas.bind("<Configure>",       lambda e: self._draw_all())
+        self.canvas.bind("<Motion>",          self._on_canvas_motion)
+        self.canvas.bind("<Leave>",           lambda e: self.conn_labels.hide_tooltip(self.canvas))
         self.connect_label = tk.Label(cf,
             text="🔗 Режим соединения: кликните на два устройства",
             font=("Consolas", 10), bg="#1a2a3a", fg=C["accent"], padx=10, pady=4)
@@ -685,6 +728,7 @@ class NetworkMapApp:
 
     def _draw_all(self):
         self.canvas.delete("all")
+        self._icon_refs = []   # сброс кэша ссылок на иконки (GC-защита)
         self._draw_grid()
         self._draw_connections()
         self._draw_devices()
@@ -736,17 +780,26 @@ class NetworkMapApp:
                 DeviceStatus.CHECKING: C["checking"],
             }.get(dev.status, C["unknown"])
 
-            is_sel = (dev_id == getattr(self, 'selected_device', None))
+            is_sel = (dev_id == self.selected_device)
             if is_sel:
                 self.canvas.create_oval(x-sz-6, y-sz-6, x+sz+6, y+sz+6,
                                         fill="", outline=C["accent"], width=2)
             self.canvas.create_oval(x-sz, y-sz, x+sz, y+sz,
                                     fill=C["bg3"], outline=sc,
                                     width=2 if not is_sel else 3)
-            icon = DEVICE_ICONS.get(dev.dtype, DEVICE_ICONS["other"])
-            self.canvas.create_text(x+1, y-5, text=icon, font=("Segoe UI Emoji", 24), fill="#000000")
-            self.canvas.create_text(x, y-6, text=icon, font=("Segoe UI Emoji", 24), fill=C["accent"])
-
+            # Иконка: PNG или emoji
+            icon_path = getattr(dev, "icon_path", "")
+            png_img = _load_png_icon(icon_path, size=40) if icon_path else None
+            if png_img:
+                # Держим ссылку чтобы не удалил GC
+                if not hasattr(self, "_icon_refs"):
+                    self._icon_refs = []
+                self._icon_refs.append(png_img)
+                self.canvas.create_image(x, y - 6, image=png_img, anchor="center")
+            else:
+                icon = DEVICE_ICONS.get(dev.dtype, DEVICE_ICONS["other"])
+                self.canvas.create_text(x+1, y-5, text=icon, font=("Segoe UI Emoji", 24), fill="#000000")
+                self.canvas.create_text(x, y-6, text=icon, font=("Segoe UI Emoji", 24), fill=C["accent"])
             self.canvas.create_oval(x+sz-12, y-sz, x+sz, y-sz+12,
                                     fill=sc, outline=C["bg"], width=1.5)
 
@@ -790,8 +843,20 @@ class NetworkMapApp:
 
             snmp_info = getattr(dev, "snmp_last_info", None)
             if dev.snmp_enabled and snmp_info and isinstance(snmp_info, dict):
+                # Собираем метки, которые уже показываются на линиях соединений
+                # чтобы не дублировать их в блоке под иконкой устройства
+                tab = self.current_tab
+                labels_on_lines: set[str] = set()
+                if tab:
+                    for (a, b) in tab.connections:
+                        if a == dev_id or b == dev_id:
+                            for slot in self.conn_labels.get(a, b):
+                                if slot.get("source_dev") == dev_id:
+                                    labels_on_lines.add(slot.get("oid_label", ""))
+
                 metrics = [(k, v) for k, v in snmp_info.items()
-                           if v and not str(v).startswith("Ошибка")]
+                           if v and not str(v).startswith("Ошибка")
+                           and k not in labels_on_lines]
                 if metrics:
                     pill_h = len(metrics) * 20 + 10
                     pill_w = 190
@@ -842,7 +907,7 @@ class NetworkMapApp:
 
     def _on_canvas_click(self, event):
         dev_id = self._get_device_at(event.x, event.y)
-        if hasattr(self, 'connect_mode') and self.connect_mode:
+        if self.connect_mode:
             if dev_id:
                 if self.connect_first is None:
                     self.connect_first = dev_id
@@ -870,12 +935,12 @@ class NetworkMapApp:
         self._draw_all()
 
     def _on_canvas_drag(self, event):
-        if hasattr(self, 'drag_device') and self.drag_device:
+        if self.drag_device:
             dev = self.devices[self.drag_device]
             dev.x = event.x - self.drag_offset[0] - self.canvas_offset[0]
             dev.y = event.y - self.drag_offset[1] - self.canvas_offset[1]
             self._draw_all()
-        elif hasattr(self, 'pan_start') and self.pan_start:
+        elif self.pan_start:
             dx, dy = event.x - self.pan_start[0], event.y - self.pan_start[1]
             self.canvas_offset[0] += dx
             self.canvas_offset[1] += dy
@@ -883,7 +948,7 @@ class NetworkMapApp:
             self._draw_all()
 
     def _on_canvas_release(self, event):
-        if hasattr(self, 'drag_device') and self.drag_device:
+        if self.drag_device:
             self._snapshot()
         self.drag_device = self.pan_start = None
 
@@ -935,6 +1000,22 @@ class NetworkMapApp:
 
     def _on_pan_drag(self, event):
         self._on_canvas_drag(event)
+
+    def _on_canvas_motion(self, event):
+        """Тултип при наведении на линию соединения."""
+        conn = self.conn_labels.get_connection_at(
+            event.x, event.y,
+            self.connections, self.devices, self.canvas_offset
+        )
+        if conn:
+            self.canvas.config(cursor="hand2")
+            self.conn_labels.show_tooltip(
+                self.canvas, event.x, event.y,
+                conn[0], conn[1], self.devices, COLORS
+            )
+        else:
+            self.canvas.config(cursor="crosshair")
+            self.conn_labels.hide_tooltip(self.canvas)
 
     # ──────────────────────────────────────────────────────────────────────────
     #  Список устройств
@@ -999,7 +1080,7 @@ class NetworkMapApp:
         self._open_device_settings(dev_id)
 
     def _delete_selected(self):
-        if hasattr(self, 'selected_device') and self.selected_device:
+        if self.selected_device:
             self._delete_device(self.selected_device)
 
     def _delete_device(self, dev_id: str):
@@ -1026,11 +1107,21 @@ class NetworkMapApp:
             self.connect_label.place_forget()
 
     def _disconnect_selected(self):
-        if hasattr(self, 'selected_device') and self.selected_device:
-            self._snapshot()
+        tab = self.current_tab
+        if not tab:
+            return
+        if self.selected_device:
             dev_id = self.selected_device
-            self.connections = [(a, b) for (a, b) in self.connections
-                                if a != dev_id and b != dev_id]
+            new_conns = [(a, b) for (a, b) in tab.connections
+                         if a != dev_id and b != dev_id]
+            if len(new_conns) == len(tab.connections):
+                self._set_status(f"Нет соединений у выбранного устройства")
+                return
+            self._snapshot()
+            tab.connections = new_conns
+            # Удаляем метки линий этого устройства
+            self.conn_labels.remove(dev_id, dev_id)  # cleanup
+            self._set_status(f"Соединения удалены")
             self._draw_all()
 
     def _open_device_settings(self, dev_id: str):
@@ -1558,6 +1649,7 @@ class NetworkMapApp:
 
     def on_close(self):
         self.monitoring_active = False
+        self.conn_labels.stop_polling()
         if messagebox.askyesno("Выход", "Сохранить изменения?", parent=self.root):
             self._save_current_map()
         self.root.destroy()
