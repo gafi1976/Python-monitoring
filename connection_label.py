@@ -28,9 +28,57 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 from typing import TYPE_CHECKING, Optional
+import re
 
 if TYPE_CHECKING:
     from device import Device
+
+
+# ─── Форматирование значений ──────────────────────────────────────────────────
+
+def _format_value(value: str, label: str = "") -> str:
+    """Форматирует значение SNMP метрики для красивого отображения на линии."""
+    lo = label.lower()
+    # Трафик в байтах → KB / MB / GB
+    if any(x in lo for x in ("octets", "bytes", "rxbytes", "txbytes")):
+        try:
+            n = float(re.sub(r"[^\d.]", "", value))
+            if n >= 1_073_741_824:
+                return f"{n/1_073_741_824:.1f} GB"
+            elif n >= 1_048_576:
+                return f"{n/1_048_576:.1f} MB"
+            elif n >= 1_024:
+                return f"{n/1_024:.1f} KB"
+            else:
+                return f"{n:.0f} B"
+        except (ValueError, TypeError):
+            pass
+    # Скорость bps → Mbps
+    if "speed" in lo:
+        try:
+            n = float(re.sub(r"[^\d.]", "", value))
+            if n >= 1_000_000_000:
+                return f"{n/1_000_000_000:.0f} Gbps"
+            elif n >= 1_000_000:
+                return f"{n/1_000_000:.0f} Mbps"
+            elif n >= 1_000:
+                return f"{n/1_000:.0f} Kbps"
+        except (ValueError, TypeError):
+            pass
+    # ifOperStatus: 1=up, 2=down
+    if "operstatus" in lo:
+        if value.strip() == "1":
+            return "up ✅"
+        elif value.strip() == "2":
+            return "down ❌"
+    # Температура
+    if any(x in lo for x in ("temp", "sensor")):
+        try:
+            n = float(re.sub(r"[^\d.]", "", value))
+            return f"{n:.1f}°C"
+        except (ValueError, TypeError):
+            pass
+    return value
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -129,13 +177,36 @@ class ConnectionLabelManager:
                     continue
                 snmp_info = getattr(src_dev, "snmp_last_info", None) or {}
                 value = snmp_info.get(oid_label)
+
+                # Формируем короткое имя метрики
+                bracket = oid_label.find(" [")
+                short_label = oid_label[:bracket] if bracket != -1 else oid_label
+                # Иконка для известных метрик
+                icon = ""
+                lo = oid_label.lower()
+                if "inoctets" in lo or "rxbytes" in lo:
+                    icon = "⬇"
+                elif "outoctets" in lo or "txbytes" in lo:
+                    icon = "⬆"
+                elif "error" in lo:
+                    icon = "⚠"
+                elif "cpu" in lo or "processor" in lo:
+                    icon = "🧠"
+                elif "storage" in lo or "disk" in lo:
+                    icon = "💾"
+                elif "temp" in lo or "sensor" in lo:
+                    icon = "🌡"
+                elif "status" in lo:
+                    icon = "●"
+
                 if value is None:
-                    lines.append(f"{oid_label}: —")
+                    lines.append(f"{icon}⏳ {short_label}")
                 else:
-                    display = str(value)
-                    if len(display) > 20:
-                        display = display[:17] + "…"
-                    lines.append(f"{oid_label}: {display}")
+                    display = _format_value(str(value), oid_label)
+                    if len(display) > 22:
+                        display = display[:19] + "…"
+                    prefix = f"{icon} " if icon else ""
+                    lines.append(f"{prefix}{short_label}: {display}")
 
             if not lines:
                 continue
@@ -381,11 +452,59 @@ class ConnectionLabelDialog:
         src_id = self._get_src_dev_id()
         dev    = self.devices.get(src_id) if src_id else None
         if dev and hasattr(dev, "snmp_oids") and dev.snmp_oids:
-            oids = [o.get("label", "") for o in dev.snmp_oids if o.get("label")]
+            oids = []
+            for o in dev.snmp_oids:
+                label = o.get("label", "")
+                if not label:
+                    continue
+                # Помечаем LLD-метрики иконкой
+                if o.get("_lld_rule"):
+                    instance = o.get("_lld_instance", "")
+                    rule     = o.get("_lld_rule", "")
+                    # Убираем дублирующий суффикс [instance] из label если он есть
+                    bracket = label.find(" [")
+                    base    = label[:bracket] if bracket != -1 else label
+                    lld_icons = {
+                        "net_interfaces": "🔌",
+                        "storage":        "💾",
+                        "processors":     "🧠",
+                        "processes":      "⚙️",
+                        "temperature":    "🌡️",
+                    }
+                    icon = lld_icons.get(rule, "📡")
+                    oids.append(f"{icon} [LLD] {base} [{instance}]")
+                else:
+                    oids.append(label)
         else:
             oids = ["(нет SNMP-метрик — настройте в ⚙ устройства)"]
         self._cb_oid["values"] = oids
         self._var_oid.set(oids[0] if oids else "")
+
+    def _get_real_label(self, display_label: str, src_id: str) -> str:
+        """Конвертирует отображаемый label обратно в реальный label из snmp_oids."""
+        dev = self.devices.get(src_id)
+        if not dev or not hasattr(dev, "snmp_oids"):
+            return display_label
+        # Для LLD-меток — ищем по базовому имени и instance
+        if display_label.startswith(("🔌 [LLD]", "💾 [LLD]", "🧠 [LLD]",
+                                      "⚙️ [LLD]", "🌡️ [LLD]", "📡 [LLD]")):
+            # Формат: "🔌 [LLD] ifInOctets [eth0]"
+            # Ищем соответствующий label в snmp_oids
+            try:
+                without_prefix = display_label.split("] ", 1)[1]  # "ifInOctets [eth0]"
+            except IndexError:
+                return display_label
+            for o in dev.snmp_oids:
+                if o.get("label", "") == without_prefix:
+                    return without_prefix
+                # Также проверим что base + instance совпадает
+                bracket = o.get("label", "").find(" [")
+                base_o = o.get("label", "")[:bracket] if bracket != -1 else o.get("label", "")
+                inst_o = o.get("_lld_instance", "")
+                if without_prefix == f"{base_o} [{inst_o}]":
+                    return o.get("label", display_label)
+            return without_prefix
+        return display_label
 
     def _on_src_change(self, _event=None):
         self._refresh_oid_list()
@@ -413,11 +532,13 @@ class ConnectionLabelDialog:
             return
         if oid_label.startswith("("):
             return  # Placeholder — нет метрик
+        # Конвертируем display-label в реальный label
+        real_label = self._get_real_label(oid_label, src_id)
         # Дедупликация
         for s in self._slots:
-            if s["source_dev"] == src_id and s["oid_label"] == oid_label:
+            if s["source_dev"] == src_id and s["oid_label"] == real_label:
                 return
-        self._slots.append({"source_dev": src_id, "oid_label": oid_label})
+        self._slots.append({"source_dev": src_id, "oid_label": real_label})
         self._refresh_listbox()
 
     def _remove_slot(self):
