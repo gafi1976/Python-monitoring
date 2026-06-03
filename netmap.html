@@ -240,41 +240,43 @@ function draw() {
       ctx.fillText(d.latency.toFixed(0)+'ms', x, y+14);
     }
 
-    ctx.font='bold 10px Consolas'; ctx.fillStyle='#ffffff';
-    ctx.fillText(d.name, x, y+sz+13);
-    ctx.font='9px Consolas'; ctx.fillStyle='#b0b0d0';
-    ctx.fillText(d.ip, x, y+sz+25);
+    ctx.font='bold 12px Consolas'; ctx.fillStyle='#ffffff';
+    ctx.fillText(d.name, x, y+sz+14);
+    ctx.font='11px Consolas'; ctx.fillStyle='#b0b0d0';
+    ctx.fillText(d.ip, x, y+sz+28);
 
     // SNMP-метрики под устройством
     var snmp = d.snmp_info;
     if (snmp && Object.keys(snmp).length > 0) {
       var entries = Object.keys(snmp).map(function(k){
         var v = String(snmp[k]);
-        if (v.length > 18) v = v.substring(0,16)+'...';
+        if (v.length > 22) v = v.substring(0,20)+'...';
         return k+': '+v;
       });
-      ctx.font='8px Consolas';
-      var bpad=5, lineH=14, maxW=0;
+      ctx.font='11px Consolas';
+      var bpad=6, lineH=17, maxW=0;
       entries.forEach(function(e){
         var w=ctx.measureText(e).width; if(w>maxW) maxW=w;
       });
-      var boxW=maxW+bpad*2, boxH=entries.length*lineH+bpad*2+14;
-      var bx=x-boxW/2, by=y+sz+34;
+      var boxW=maxW+bpad*2, boxH=entries.length*lineH+bpad*2+16;
+      var bx=x-boxW/2, by=y+sz+40;
       ctx.fillStyle='#0d1a0d'; ctx.strokeStyle='#264f78'; ctx.lineWidth=1;
       ctx.beginPath(); ctx.rect(bx,by,boxW,boxH); ctx.fill(); ctx.stroke();
+      ctx.font='10px Consolas';
       ctx.fillStyle='#264f78'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText('-- SNMP --', x, by+7);
+      ctx.fillText('-- SNMP --', x, by+8);
+      ctx.font='11px Consolas';
       ctx.fillStyle='#ffb454';
       entries.forEach(function(e,i){
-        ctx.fillText(e, x, by+14+bpad+i*lineH+lineH/2);
+        ctx.fillText(e, x, by+16+bpad+i*lineH+lineH/2);
       });
     }
   });
 }
 
 function drawLabelBox(mx, my, lines) {
-  ctx.font='9px Consolas';
-  var lh=14, px=6, py=3, mw=0;
+  ctx.font='11px Consolas';
+  var lh=16, px=7, py=4, mw=0;
   lines.forEach(function(l){ var w=ctx.measureText(l).width; if(w>mw)mw=w; });
   var bw=mw+px*2, bh=lines.length*lh+py*2, bx=mx-bw/2, by=my-bh/2;
   ctx.fillStyle='#1a2233'; ctx.strokeStyle='#444466'; ctx.lineWidth=1;
