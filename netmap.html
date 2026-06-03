@@ -1610,8 +1610,31 @@ document.getElementById('btn-backup').addEventListener('click', function() {
 // ════════════════════════════════════════════════════════════════════════════
 var _myRole = 'viewer';
 
+function applyRole(role) {
+  _myRole = role || 'viewer';
+  var btn = document.getElementById('btn-users');
+  if (_myRole === 'admin') {
+    btn.style.opacity = '1';
+    btn.title = 'Управление пользователями';
+  } else {
+    btn.style.opacity = '0.4';
+    btn.title = 'Только для администратора';
+  }
+}
+
+// Загружаем роль сразу при старте
+function loadMyRole() {
+  fetch('/api/users').then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (data.ok) applyRole(data.my_role);
+    }).catch(function(){});
+}
+
 document.getElementById('btn-users').addEventListener('click', function() {
-  if (_myRole !== 'admin') { alert('Только администратор может управлять пользователями'); return; }
+  if (_myRole !== 'admin') {
+    alert('Доступ запрещён.\nТолько администратор может управлять пользователями.\n\nЛогин: admin / Пароль: admin');
+    return;
+  }
   document.getElementById('users-panel').classList.add('open');
   loadUsers();
 });
@@ -1620,7 +1643,7 @@ function loadUsers() {
   fetch('/api/users').then(function(r){ return r.json(); })
     .then(function(data) {
       if (!data.ok) return;
-      _myRole = data.my_role || 'viewer';
+      applyRole(data.my_role);
       var html = '';
       data.users.forEach(function(u) {
         html += '<div class="u-row">'
@@ -1914,7 +1937,7 @@ loadMapForTab = function(tabName) {
     if (wasEmpty || tabChanged) centerMap();
 
     // Роль пользователя
-    if (st.role) _myRole = st.role;
+    if (st.role) applyRole(st.role);
 
     document.getElementById('s-on').textContent  = st.online  || 0;
     document.getElementById('s-off').textContent = st.offline || 0;
@@ -2031,6 +2054,7 @@ function startSSE() {
 window.addEventListener('load', function(){
   resize();
   requestNotificationPermission();
+  loadMyRole();   // ← загружаем роль до любых кликов
   loadAll();
   // Запускаем SSE — если браузер поддерживает
   if (typeof EventSource !== 'undefined') {
