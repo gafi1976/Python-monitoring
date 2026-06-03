@@ -1,0 +1,2073 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NetMap Monitor</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:hidden; }
+
+/* ── Toolbar ── */
+#bar {
+  position:fixed; top:0; left:0; right:0; height:50px;
+  background:#23233a; border-bottom:1px solid #444466;
+  display:flex; align-items:center; padding:0 14px; gap:10px; z-index:10;
+}
+#bar h1 { font-size:14px; color:#ffb86c; margin-right:4px; white-space:nowrap; }
+.badge {
+  background:#2d2d44; border:1px solid #444466; border-radius:5px;
+  padding:3px 10px; font-size:12px; display:flex; align-items:center; gap:4px;
+  white-space:nowrap;
+}
+#upd { margin-left:auto; font-size:11px; color:#666; white-space:nowrap; }
+.tbtn {
+  background:#2d2d44; border:1px solid #444466; color:#ffb86c;
+  padding:5px 12px; border-radius:5px; cursor:pointer;
+  font-size:12px; font-family:inherit; white-space:nowrap;
+}
+.tbtn:hover { background:#444466; }
+
+/* ── Tab bar ── */
+#tabbar {
+  position:fixed; top:50px; left:0; right:0; height:32px;
+  background:#1e1e35; border-bottom:1px solid #444466;
+  display:flex; align-items:stretch; overflow-x:auto; z-index:9;
+  scrollbar-width:none;
+}
+#tabbar::-webkit-scrollbar { display:none; }
+.tab {
+  padding:0 16px; font-size:12px; cursor:pointer;
+  display:flex; align-items:center; gap:6px;
+  border-right:1px solid #333355; white-space:nowrap;
+  color:#b0b0d0; transition:background 0.15s;
+  position:relative;
+}
+.tab:hover { background:#2d2d44; color:#fff; }
+.tab.active {
+  background:#2d2d44; color:#ffb86c;
+  border-bottom:2px solid #ffb86c;
+}
+.tab-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.tab-count { font-size:10px; color:#666; }
+
+/* ── Canvas area ── */
+#wrap {
+  position:fixed; top:82px; left:0; right:300px; bottom:0; overflow:hidden;
+}
+#c { display:block; cursor:grab; }
+
+/* ── Side panel ── */
+#side {
+  position:fixed; top:82px; right:0; width:300px; bottom:0;
+  background:#23233a; border-left:1px solid #444466;
+  display:flex; flex-direction:column;
+}
+#side-hdr {
+  padding:8px 12px; font-size:11px; color:#b0b0d0;
+  background:#2d2d44; border-bottom:1px solid #444466;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#search-wrap {
+  padding:6px 8px; background:#1e1e35;
+  border-bottom:1px solid #444466;
+}
+#search-inp {
+  width:100%; background:#2d2d44; border:1px solid #444466;
+  border-radius:5px; color:#fff; padding:5px 10px;
+  font-family:inherit; font-size:12px; outline:none;
+  transition:border 0.2s;
+}
+#search-inp:focus { border-color:#ffb86c; }
+#list { flex:1; overflow-y:auto; }
+.di { padding:7px 12px; cursor:pointer; border-bottom:1px solid #2d2d44; }
+.di:hover { background:#2d2d44; }
+.di.sel  { background:#3a3a55; }
+.dn  { font-size:12px; font-weight:bold; }
+.dip { font-size:11px; color:#b0b0d0; margin-top:2px; }
+
+#det {
+  height:220px; border-top:1px solid #444466;
+  padding:10px 12px; overflow-y:auto; font-size:12px;
+}
+#det h3 { color:#ffb86c; margin-bottom:7px; }
+.dr {
+  display:flex; justify-content:space-between; padding:2px 0;
+  border-bottom:1px solid #2a2a3a;
+}
+.dk { color:#888; }
+.dv { color:#fff; text-align:right; max-width:160px; word-break:break-all; }
+
+/* ── Tooltip ── */
+#tip {
+  position:fixed; pointer-events:auto; display:none;
+  background:#1a1e33; border:1px solid #444466; border-radius:8px;
+  padding:10px 13px; font-size:12px; z-index:20;
+  min-width:200px; max-width:320px; line-height:1.7;
+  box-shadow:0 6px 24px rgba(0,0,0,0.6);
+}
+#tip-chart-wrap {
+  margin-top:8px; display:none;
+}
+#tip-chart-title {
+  font-size:11px; color:#b0b0d0; margin-bottom:4px;
+}
+#tip-chart {
+  display:block; border-radius:4px;
+  background:#0d1020; border:1px solid #2d2d44;
+}
+#tip-periods {
+  display:flex; gap:4px; margin-bottom:6px; flex-wrap:wrap;
+}
+.tip-period-btn {
+  background:#2d2d44; border:1px solid #444466; color:#b0b0d0;
+  padding:2px 8px; border-radius:4px; cursor:pointer;
+  font-size:11px; font-family:inherit; transition:all 0.15s;
+}
+.tip-period-btn:hover  { background:#444466; color:#fff; }
+.tip-period-btn.active { background:#ffb86c; color:#1a1a2e; border-color:#ffb86c; font-weight:bold; }
+/* ── Intervals modal ── */
+#modal-overlay {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.6); z-index:100;
+  align-items:center; justify-content:center;
+}
+#modal-overlay.open { display:flex; }
+#modal {
+  background:#23233a; border:1px solid #444466; border-radius:10px;
+  padding:22px 26px; min-width:320px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.7);
+}
+#modal h2 { color:#ffb86c; font-size:14px; margin-bottom:18px; }
+.mrow { margin-bottom:14px; }
+.mrow label { display:block; font-size:12px; color:#b0b0d0; margin-bottom:5px; }
+.mrow input[type=range] { width:100%; accent-color:#ffb86c; }
+.mrow .mval {
+  display:inline-block; font-size:13px; color:#fff;
+  font-weight:bold; margin-left:8px; min-width:36px;
+}
+.mbtns { display:flex; gap:10px; margin-top:20px; justify-content:flex-end; }
+.mbtn {
+  background:#2d2d44; border:1px solid #444466; color:#ffb86c;
+  padding:6px 16px; border-radius:5px; cursor:pointer;
+  font-family:inherit; font-size:12px;
+}
+.mbtn:hover { background:#444466; }
+.mbtn.primary { background:#ffb86c; color:#1a1a2e; border-color:#ffb86c; font-weight:bold; }
+.mbtn.primary:hover { background:#ffd08c; }
+
+/* ── Log panel ── */
+#log-panel {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.7); z-index:110;
+  align-items:center; justify-content:center;
+}
+#log-panel.open { display:flex; }
+#log-box {
+  background:#1a1e33; border:1px solid #444466; border-radius:10px;
+  width:min(820px,96vw); max-height:80vh; display:flex; flex-direction:column;
+  box-shadow:0 8px 40px rgba(0,0,0,0.7);
+}
+#log-header {
+  display:flex; align-items:center; gap:10px; padding:12px 16px;
+  border-bottom:1px solid #444466; background:#23233a; border-radius:10px 10px 0 0;
+}
+#log-header h2 { font-size:14px; color:#ffb86c; flex:1; }
+#log-filter { display:flex; gap:6px; }
+.log-fbtn {
+  background:#2d2d44; border:1px solid #444466; color:#b0b0d0;
+  padding:3px 10px; border-radius:4px; cursor:pointer;
+  font-size:11px; font-family:inherit;
+}
+.log-fbtn.active { background:#ffb86c; color:#1a1a2e; border-color:#ffb86c; }
+#log-close { background:none; border:none; color:#666; font-size:18px; cursor:pointer; padding:0 4px; }
+#log-close:hover { color:#ff5555; }
+#log-body { overflow-y:auto; flex:1; padding:8px 0; }
+.log-row {
+  display:grid; grid-template-columns:130px 80px 1fr;
+  padding:5px 16px; border-bottom:1px solid #1e2235; font-size:11px; gap:8px;
+}
+.log-row:hover { background:#23233a; }
+.log-ts   { color:#666; }
+.log-type { font-weight:bold; border-radius:3px; padding:1px 6px;
+            font-size:10px; text-align:center; display:inline-block; }
+.sev-critical { background:#3a0d0d; color:#ff5555; }
+.sev-warning  { background:#2a2000; color:#f1fa8c; }
+.sev-info     { background:#0d1a3a; color:#8be9fd; }
+.log-msg  { color:#b0b0d0; }
+
+/* ── Summary stats ── */
+#summary-bar {
+  display:none; border-top:1px solid #444466; padding:8px 12px;
+  background:#1e1e35; font-size:11px;
+}
+#summary-bar.open { display:flex; gap:18px; flex-wrap:wrap; align-items:center; }
+.sum-item { display:flex; flex-direction:column; align-items:center; }
+.sum-val  { font-size:14px; font-weight:bold; color:#ffb86c; }
+.sum-lbl  { font-size:10px; color:#666; }
+
+/* ── Annotation layer ── */
+#ann-layer {
+  position:fixed; top:82px; left:0; right:300px; bottom:0;
+  pointer-events:none; z-index:4; overflow:hidden;
+}
+.ann-item {
+  position:absolute; pointer-events:auto; cursor:move;
+  background:rgba(30,34,51,0.92); border:1px solid #ffb86c;
+  border-radius:5px; padding:4px 8px; font-size:11px;
+  color:#fff; user-select:none;
+}
+.ann-del { float:right; cursor:pointer; color:#ff5555; margin-left:6px; font-size:13px; }
+
+/* ── Users panel ── */
+#users-panel {
+  display:none; position:fixed; inset:0; z-index:120;
+  background:rgba(0,0,0,0.7); align-items:center; justify-content:center;
+}
+#users-panel.open { display:flex; }
+#users-box {
+  background:#1a1e33; border:1px solid #444466; border-radius:10px;
+  width:460px; padding:22px 24px; box-shadow:0 8px 40px rgba(0,0,0,0.7);
+}
+#users-box h2 { color:#ffb86c; font-size:14px; margin-bottom:16px; }
+.u-row { display:flex; align-items:center; gap:8px; padding:5px 0;
+         border-bottom:1px solid #2a2a3a; font-size:12px; }
+.u-name { flex:1; }
+.u-role { padding:2px 8px; border-radius:3px; font-size:10px; }
+.role-admin  { background:#2d1500; color:#ffb86c; }
+.role-viewer { background:#0d1a3a; color:#8be9fd; }
+.u-del { background:none; border:none; color:#ff5555; cursor:pointer; font-size:14px; }
+
+/* ── Theme light ── */
+body.light-theme { background:#f0f4ff; color:#222; }
+body.light-theme #bar,
+body.light-theme #side,
+body.light-theme #tabbar { background:#e0e4f5; border-color:#b0b4d0; }
+body.light-theme .tbtn { background:#d0d4e8; border-color:#b0b4d0; color:#333; }
+body.light-theme #list .di:hover,
+body.light-theme #list .di.sel { background:#d0d4e8; }
+body.light-theme #det { background:#e0e4f5; }
+body.light-theme #search-inp { background:#d0d4e8; border-color:#b0b4d0; color:#222; }
+</style>
+</head>
+<body>
+
+<!-- Toolbar -->
+<div id="bar">
+  <h1>&#9783; NetMap</h1>
+  <div class="badge"><span style="color:#50fa7b">&#9679;</span>&nbsp;Online:&nbsp;<b id="s-on">0</b></div>
+  <div class="badge"><span style="color:#ff5555">&#9679;</span>&nbsp;Offline:&nbsp;<b id="s-off">0</b></div>
+  <div class="badge"><span style="color:#8be9fd">&#9679;</span>&nbsp;Unknown:&nbsp;<b id="s-unk">0</b></div>
+  <button class="tbtn" id="btn-refresh">&#8635; Refresh</button>
+  <button class="tbtn" id="btn-intervals" title="Настройка интервалов">&#9201; Интервалы</button>
+  <button class="tbtn" id="btn-png" title="Сохранить карту как PNG">&#128247; PNG</button>
+  <button class="tbtn" id="btn-clip" title="Копировать карту в буфер">&#128203; Копировать</button>
+  <button class="tbtn" id="btn-log" title="Лог событий">&#128220; Лог</button>
+  <button class="tbtn" id="btn-layout" title="Авто-расстановка устройств">&#127218; Layout</button>
+  <button class="tbtn" id="btn-ann" title="Добавить аннотацию на карту">&#128393; Заметка</button>
+  <button class="tbtn" id="btn-theme" title="Переключить тему">&#9788; Тема</button>
+  <button class="tbtn" id="btn-users" title="Управление пользователями">&#128100; Польз.</button>
+  <button class="tbtn" id="btn-backup" title="Скачать резервную копию">&#128190; Backup</button>
+  <button class="tbtn" id="btn-logout" title="Выйти" style="color:#ff5555">&#10006; Выйти</button>
+  <span id="upd"></span>
+</div>
+
+<!-- Tab bar -->
+<div id="tabbar"></div>
+
+<!-- Canvas -->
+<div id="wrap"><canvas id="c"></canvas></div>
+
+<!-- Side panel -->
+<div id="side">
+  <div id="side-hdr">DEVICES</div>
+  <div id="search-wrap">
+    <input id="search-inp" type="text" placeholder="&#128269; Поиск по имени / IP...">
+  </div>
+  <div id="list"></div>
+  <div id="det"><p style="color:#555;padding:8px">Click a device</p></div>
+</div>
+
+<div id="tip">
+  <div id="tip-info"></div>
+  <div id="tip-chart-wrap">
+    <div id="tip-periods">
+      <button class="tip-period-btn active" data-period="5m">5м</button>
+      <button class="tip-period-btn" data-period="10m">10м</button>
+      <button class="tip-period-btn" data-period="1h">1ч</button>
+      <button class="tip-period-btn" data-period="1d">1д</button>
+      <button class="tip-period-btn" data-period="1mo">1мес</button>
+    </div>
+    <div id="tip-chart-title"></div>
+    <canvas id="tip-chart" width="260" height="90"></canvas>
+  </div>
+</div>
+
+<!-- Intervals modal -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h2>&#9201; Настройка интервалов</h2>
+
+    <div class="mrow">
+      <label>Автообновление карты:
+        <span class="mval" id="val-map">5 с</span>
+      </label>
+      <input type="range" id="rng-map" min="2" max="60" step="1" value="5">
+    </div>
+
+    <div class="mrow">
+      <label>Задержка загрузки графика (наведение):
+        <span class="mval" id="val-tip">0.4 с</span>
+      </label>
+      <input type="range" id="rng-tip" min="0" max="2000" step="100" value="400">
+    </div>
+
+    <div class="mrow">
+      <label>Глубина истории для графика (точек):
+        <span class="mval" id="val-pts">60</span>
+      </label>
+      <input type="range" id="rng-pts" min="10" max="200" step="10" value="60">
+    </div>
+
+    <div class="mbtns">
+      <button class="mbtn" id="btn-modal-cancel">Отмена</button>
+      <button class="mbtn" id="btn-purge" style="color:#ff5555" title="Удалить старые записи из БД">&#128465; Очистить историю</button>
+      <button class="mbtn primary" id="btn-modal-ok">&#10003; Применить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Annotation layer -->
+<div id="ann-layer"></div>
+
+<!-- Log panel -->
+<div id="log-panel">
+  <div id="log-box">
+    <div id="log-header">
+      <h2>&#128220; Лог событий</h2>
+      <div id="log-filter">
+        <button class="log-fbtn active" data-type="">Все</button>
+        <button class="log-fbtn" data-type="status_change">Статус</button>
+        <button class="log-fbtn" data-type="snmp_trigger">Триггер</button>
+        <button class="log-fbtn" data-type="snmp_error">Ошибки</button>
+      </div>
+      <button id="log-close">&#10005;</button>
+    </div>
+    <div id="log-body"></div>
+  </div>
+</div>
+
+<!-- Summary stats bar -->
+<div id="summary-bar">
+  <div class="sum-item"><div class="sum-val" id="sum-in">—</div><div class="sum-lbl">&#8595; Трафик IN</div></div>
+  <div class="sum-item"><div class="sum-val" id="sum-out">—</div><div class="sum-lbl">&#8593; Трафик OUT</div></div>
+  <div class="sum-item"><div class="sum-val" id="sum-lat">—</div><div class="sum-lbl">avg Ping</div></div>
+  <div class="sum-item"><div class="sum-val" id="sum-max">—</div><div class="sum-lbl">max Ping</div></div>
+  <div class="sum-item"><div class="sum-val" id="sum-onl">—</div><div class="sum-lbl">Online %</div></div>
+</div>
+
+<!-- Users panel -->
+<div id="users-panel">
+  <div id="users-box">
+    <h2>&#128100; Управление пользователями</h2>
+    <div id="users-list"></div>
+    <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap" id="users-add-row">
+      <input id="u-name"  placeholder="Логин"   style="flex:1;background:#2d2d44;border:1px solid #444466;color:#fff;padding:6px 10px;border-radius:5px;font-family:inherit;font-size:12px;outline:none">
+      <input id="u-pw"    placeholder="Пароль"  type="password" style="flex:1;background:#2d2d44;border:1px solid #444466;color:#fff;padding:6px 10px;border-radius:5px;font-family:inherit;font-size:12px;outline:none">
+      <select id="u-role" style="background:#2d2d44;border:1px solid #444466;color:#fff;padding:6px;border-radius:5px;font-family:inherit;font-size:12px">
+        <option value="viewer">viewer</option>
+        <option value="admin">admin</option>
+      </select>
+      <button onclick="addUser()" style="background:#50fa7b;border:none;color:#1a1a2e;padding:6px 14px;border-radius:5px;cursor:pointer;font-family:inherit;font-weight:bold">+</button>
+    </div>
+    <div id="users-err" style="color:#ff5555;font-size:11px;margin-top:6px;min-height:16px"></div>
+    <div style="text-align:right;margin-top:12px">
+      <button onclick="document.getElementById('users-panel').classList.remove('open')"
+        style="background:#2d2d44;border:1px solid #444466;color:#b0b0d0;padding:6px 16px;border-radius:5px;cursor:pointer;font-family:inherit">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Настройки интервалов (изменяются через диалог) ───────────────────────────
+var CFG = {
+  mapInterval:  5000,   // мс — автообновление карты
+  tipDelay:     400,    // мс — задержка появления графика в тултипе
+  historyLimit: 60      // кол-во точек для графика в тултипе
+};
+
+var _mapTimer = null;  // id текущего setInterval карты
+
+function applyMapInterval() {
+  if (_mapTimer) clearInterval(_mapTimer);
+  _mapTimer = setInterval(function(){
+    loadTabs();
+    // Если SSE активен — не делаем полный reload карты, только вкладки
+    if (!_sseActive) {
+      loadMapForTab(currentTab);
+    } else {
+      loadSummary();
+    }
+  }, CFG.mapInterval);
+}
+
+// ── Модал интервалов ──────────────────────────────────────────────────────────
+function openIntervalsModal() {
+  var overlay = document.getElementById('modal-overlay');
+  document.getElementById('rng-map').value = CFG.mapInterval / 1000;
+  document.getElementById('val-map').textContent = (CFG.mapInterval/1000) + ' с';
+  document.getElementById('rng-tip').value = CFG.tipDelay;
+  document.getElementById('val-tip').textContent = (CFG.tipDelay/1000).toFixed(1) + ' с';
+  document.getElementById('rng-pts').value = CFG.historyLimit;
+  document.getElementById('val-pts').textContent = CFG.historyLimit;
+  overlay.classList.add('open');
+}
+
+document.getElementById('rng-map').addEventListener('input', function(){
+  document.getElementById('val-map').textContent = this.value + ' с';
+});
+document.getElementById('rng-tip').addEventListener('input', function(){
+  document.getElementById('val-tip').textContent = (this.value/1000).toFixed(1) + ' с';
+});
+document.getElementById('rng-pts').addEventListener('input', function(){
+  document.getElementById('val-pts').textContent = this.value;
+});
+document.getElementById('btn-modal-cancel').addEventListener('click', function(){
+  document.getElementById('modal-overlay').classList.remove('open');
+});
+document.getElementById('btn-modal-ok').addEventListener('click', function(){
+  CFG.mapInterval  = parseInt(document.getElementById('rng-map').value) * 1000;
+  CFG.tipDelay     = parseInt(document.getElementById('rng-tip').value);
+  CFG.historyLimit = parseInt(document.getElementById('rng-pts').value);
+  tipHistory = {};  // сбрасываем весь кэш
+  applyMapInterval();
+  document.getElementById('modal-overlay').classList.remove('open');
+});
+document.getElementById('btn-purge').addEventListener('click', function() {
+  if (!confirm('Удалить записи истории старше 90 дней?\nЭто действие необратимо.')) return;
+  fetch('/api/db/purge', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days:90})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) alert('Удалено записей: ' + d.deleted + '\nРазмер БД: ' + d.size_mb + ' МБ');
+      else      alert('Ошибка: ' + d.error);
+    });
+});
+// Закрыть по клику на оверлей
+document.getElementById('modal-overlay').addEventListener('click', function(e){
+  if (e.target === this) this.classList.remove('open');
+});
+
+
+var STATUS_COLOR = {
+  'Online':      '#50fa7b',
+  'Offline':     '#ff5555',
+  '\u041d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e': '#8be9fd',
+  '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430...':           '#f1fa8c'
+};
+var DTYPE_LABEL = {
+  router:'RTR', switch:'SW', server:'SRV', pc:'PC',
+  printer:'PRN', camera:'CAM', phone:'TEL', ups:'UPS', other:'DEV'
+};
+
+// ── Состояние ────────────────────────────────────────────────────────────────
+var mapData     = { devices:[], connections:[], labels:[], tab:'' };
+var allTabs     = [];          // список карт от /api/tabs
+var currentTab  = '';          // имя выбранной карты в браузере
+var selId       = null;
+var ox=0, oy=0;
+var drag=false, dragX=0, dragY=0, ox0=0, oy0=0;
+var prevTabName = '';          // для определения смены карты (сброс центра)
+
+// ── Canvas ───────────────────────────────────────────────────────────────────
+var wrap   = document.getElementById('wrap');
+var canvas = document.getElementById('c');
+var ctx    = canvas.getContext('2d');
+
+function resize() {
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  draw();
+}
+
+// ── Центрирование ────────────────────────────────────────────────────────────
+function centerMap() {
+  if (!mapData.devices.length) return;
+  var xs = mapData.devices.map(function(d){ return d.x; });
+  var ys = mapData.devices.map(function(d){ return d.y; });
+  ox = canvas.width  / 2 - (Math.min.apply(null,xs) + Math.max.apply(null,xs)) / 2;
+  oy = canvas.height / 2 - (Math.min.apply(null,ys) + Math.max.apply(null,ys)) / 2;
+}
+
+// ── Рисование ────────────────────────────────────────────────────────────────
+function draw() {
+  var w = canvas.width, h = canvas.height;
+  if (!w || !h) return;
+  ctx.clearRect(0, 0, w, h);
+
+  // Сетка
+  ctx.strokeStyle = '#2d2d44'; ctx.lineWidth = 1;
+  var step = 40;
+  for (var gx = ((ox%step)+step)%step; gx < w; gx += step) {
+    ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,h); ctx.stroke();
+  }
+  for (var gy = ((oy%step)+step)%step; gy < h; gy += step) {
+    ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(w,gy); ctx.stroke();
+  }
+
+  var dm = {};
+  mapData.devices.forEach(function(d){ dm[d.id] = d; });
+
+  // Проход 1: только линии (без меток — метки рисуем после, поверх линий)
+  mapData.connections.forEach(function(c) {
+    var d1=dm[c.from], d2=dm[c.to];
+    if (!d1||!d2) return;
+    var x1=d1.x+ox, y1=d1.y+oy, x2=d2.x+ox, y2=d2.y+oy;
+    var both = (d1.status==='Online' && d2.status==='Online');
+    ctx.beginPath();
+    ctx.strokeStyle = both ? '#50fa7b' : '#6272a4';
+    ctx.lineWidth   = both ? 2 : 1;
+    ctx.setLineDash(both ? [] : [5,5]);
+    ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    ctx.setLineDash([]);
+  });
+
+  // Проход 2: метки на линиях (поверх линий, под устройствами)
+  mapData.connections.forEach(function(c) {
+    var d1=dm[c.from], d2=dm[c.to];
+    if (!d1||!d2) return;
+    var x1=d1.x+ox, y1=d1.y+oy, x2=d2.x+ox, y2=d2.y+oy;
+    var mx=(x1+x2)/2, my=(y1+y2)/2;
+    var ll = mapData.labels.filter(function(l){
+      return (l.from===c.from&&l.to===c.to)||(l.from===c.to&&l.to===c.from);
+    });
+    if (!ll.length) return;
+    var lines = ll.map(function(l){
+      var sh  = l.label.replace(/ \[.*?\]$/, '');
+      var lo  = sh.toLowerCase();
+      var raw = l.value != null ? String(l.value) : null;
+      var unit = l.unit || '';
+
+      // Форматируем байты → KB/MB/GB
+      var val;
+      if (raw === null) {
+        val = '...';
+      } else {
+        var numRaw = parseFloat(raw.replace(/[^\d.]/g, ''));
+        var isBytes = lo.indexOf('octets') !== -1 || lo.indexOf('bytes') !== -1;
+        var isBps   = lo.indexOf('speed')  !== -1;
+        if (isBytes && !isNaN(numRaw)) {
+          if      (numRaw >= 1073741824) val = (numRaw/1073741824).toFixed(2) + ' GB';
+          else if (numRaw >= 1048576)    val = (numRaw/1048576).toFixed(1)    + ' MB';
+          else if (numRaw >= 1024)       val = (numRaw/1024).toFixed(1)       + ' KB';
+          else                           val = numRaw.toFixed(0)              + ' B';
+        } else if (isBps && !isNaN(numRaw)) {
+          if      (numRaw >= 1000000000) val = (numRaw/1000000000).toFixed(0) + ' Gbps';
+          else if (numRaw >= 1000000)    val = (numRaw/1000000).toFixed(0)    + ' Mbps';
+          else if (numRaw >= 1000)       val = (numRaw/1000).toFixed(0)       + ' Kbps';
+          else                           val = numRaw + ' bps';
+        } else {
+          val = raw + (unit ? ' ' + unit : '');
+        }
+      }
+
+      // Иконка + цвет по типу
+      var icon, color;
+      if      (lo.indexOf('inoctets')  !== -1) { icon = '\u2193'; color = '#50fa7b'; } // ↓ зелёный
+      else if (lo.indexOf('outoctets') !== -1) { icon = '\u2191'; color = '#ffb86c'; } // ↑ оранжевый
+      else if (lo.indexOf('error')     !== -1) { icon = '\u26a0'; color = '#ff5555'; } // ⚠ красный
+      else if (lo.indexOf('status')    !== -1) { icon = '\u25cf'; color = '#8be9fd'; } // ● голубой
+      else if (lo.indexOf('speed')     !== -1) { icon = '\u26a1'; color = '#f1fa8c'; } // ⚡ жёлтый
+      else                                     { icon = ' ';      color = '#ffffff'; }
+
+      return { text: icon + ' ' + sh + ': ' + val, color: color };
+    });
+    drawLabelBox(mx, my, lines);
+  });
+
+  // Устройства
+  mapData.devices.forEach(function(d) {
+    var x=d.x+ox, y=d.y+oy, sz=28;
+    var sc    = STATUS_COLOR[d.status] || '#8be9fd';
+    var isSel = (d.id === selId);
+
+    if (isSel) {
+      ctx.beginPath(); ctx.arc(x,y,sz+7,0,Math.PI*2);
+      ctx.strokeStyle='#ffb86c'; ctx.lineWidth=2; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(x,y,sz,0,Math.PI*2);
+    ctx.fillStyle='#2d2d44'; ctx.fill();
+    ctx.strokeStyle=sc; ctx.lineWidth=isSel?3:2; ctx.stroke();
+
+    ctx.font='bold 9px Consolas';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle=sc;
+    ctx.fillText(DTYPE_LABEL[d.dtype]||'DEV', x, y-3);
+
+    ctx.beginPath(); ctx.arc(x+sz-7, y-sz+5, 5, 0, Math.PI*2);
+    ctx.fillStyle=sc; ctx.fill();
+    ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=1.5; ctx.stroke();
+
+    if (d.status==='Online' && d.latency!=null) {
+      var lc = d.latency<50?'#50fa7b':d.latency<150?'#f1fa8c':'#ff5555';
+      ctx.font='8px Consolas'; ctx.fillStyle=lc;
+      ctx.fillText(d.latency.toFixed(0)+'ms', x, y+14);
+    }
+
+    ctx.font='bold 12px Consolas'; ctx.fillStyle='#ffffff';
+    ctx.fillText(d.name, x, y+sz+14);
+    ctx.font='11px Consolas'; ctx.fillStyle='#b0b0d0';
+    ctx.fillText(d.ip, x, y+sz+28);
+
+    // SNMP-метрики под устройством
+    var snmp = d.snmp_info;
+    if (snmp && Object.keys(snmp).length > 0) {
+      var entries = Object.keys(snmp).map(function(k){
+        var v = String(snmp[k]);
+        if (v.length > 22) v = v.substring(0,20)+'...';
+        return k+': '+v;
+      });
+      ctx.font='11px Consolas';
+      var bpad=6, lineH=17, maxW=0;
+      entries.forEach(function(e){
+        var w=ctx.measureText(e).width; if(w>maxW) maxW=w;
+      });
+      var boxW=maxW+bpad*2, boxH=entries.length*lineH+bpad*2+16;
+      var bx=x-boxW/2, by=y+sz+40;
+      ctx.fillStyle='#0d1a0d'; ctx.strokeStyle='#264f78'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.rect(bx,by,boxW,boxH); ctx.fill(); ctx.stroke();
+      ctx.font='10px Consolas';
+      ctx.fillStyle='#264f78'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('-- SNMP --', x, by+8);
+      ctx.font='11px Consolas';
+      ctx.fillStyle='#ffb454';
+      entries.forEach(function(e,i){
+        ctx.fillText(e, x, by+16+bpad+i*lineH+lineH/2);
+      });
+    }
+  });
+}
+
+function drawLabelBox(mx, my, lines) {
+  ctx.font = '11px Consolas';
+  var lh=18, px=10, py=6, mw=0;
+  lines.forEach(function(l){
+    var w = ctx.measureText(l.text).width;
+    if (w > mw) mw = w;
+  });
+  var bw=mw+px*2, bh=lines.length*lh+py*2;
+  var bx=mx-bw/2, by=my-bh/2;
+
+  // Тень + фон
+  ctx.shadowColor='rgba(0,0,0,0.7)'; ctx.shadowBlur=8;
+  ctx.shadowOffsetX=2; ctx.shadowOffsetY=2;
+  ctx.fillStyle='#0d1525';
+  var r=5;
+  ctx.beginPath();
+  ctx.moveTo(bx+r,by);
+  ctx.lineTo(bx+bw-r,by);    ctx.arcTo(bx+bw,by,    bx+bw,by+r,    r);
+  ctx.lineTo(bx+bw,by+bh-r); ctx.arcTo(bx+bw,by+bh, bx+bw-r,by+bh,r);
+  ctx.lineTo(bx+r,by+bh);    ctx.arcTo(bx,   by+bh,  bx,by+bh-r,   r);
+  ctx.lineTo(bx,by+r);       ctx.arcTo(bx,   by,     bx+r,by,       r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowColor='transparent'; ctx.shadowBlur=0;
+  ctx.shadowOffsetX=0; ctx.shadowOffsetY=0;
+
+  // Рамка — цвет первой строки
+  ctx.strokeStyle = lines.length ? lines[0].color : '#ffb86c';
+  ctx.lineWidth   = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(bx+r,by);
+  ctx.lineTo(bx+bw-r,by);    ctx.arcTo(bx+bw,by,    bx+bw,by+r,    r);
+  ctx.lineTo(bx+bw,by+bh-r); ctx.arcTo(bx+bw,by+bh, bx+bw-r,by+bh,r);
+  ctx.lineTo(bx+r,by+bh);    ctx.arcTo(bx,   by+bh,  bx,by+bh-r,   r);
+  ctx.lineTo(bx,by+r);       ctx.arcTo(bx,   by,     bx+r,by,       r);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Текст
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  lines.forEach(function(l, i){
+    ctx.fillStyle = l.color;
+    ctx.fillText(l.text, mx, by + py + (i+0.5)*lh);
+  });
+}
+
+// ── Tab bar ──────────────────────────────────────────────────────────────────
+function renderTabs() {
+  var html = '';
+  allTabs.forEach(function(t) {
+    var isActive = (t.name === currentTab);
+    // Цвет точки: зелёный если есть online, красный если есть offline, серый
+    var dotColor = t.online > 0 ? '#50fa7b' : t.offline > 0 ? '#ff5555' : '#666';
+    html += '<div class="tab' + (isActive ? ' active' : '') + '" '
+          + 'onclick="switchTab(\'' + escAttr(t.name) + '\')">'
+          + '<span class="tab-dot" style="background:' + dotColor + '"></span>'
+          + escHtml(t.name)
+          + '<span class="tab-count">' + t.total + '</span>'
+          + '</div>';
+  });
+  document.getElementById('tabbar').innerHTML = html;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return String(s).replace(/'/g,"\\'");
+}
+
+function switchTab(name) {
+  if (name === currentTab) return;
+  currentTab  = name;
+  selId       = null;
+  prevTabName = name;
+  renderTabs();
+  loadMapForTab(name);
+}
+
+// ── Mouse ────────────────────────────────────────────────────────────────────
+canvas.addEventListener('mousedown', function(e){
+  drag=true; canvas.style.cursor='grabbing';
+  dragX=e.clientX; dragY=e.clientY; ox0=ox; oy0=oy;
+});
+canvas.addEventListener('mousemove', function(e){
+  if (drag){ ox=ox0+(e.clientX-dragX); oy=oy0+(e.clientY-dragY); draw(); }
+  showTooltip(e);
+});
+canvas.addEventListener('mouseup', function(e){
+  var moved = Math.abs(e.clientX-dragX)>4||Math.abs(e.clientY-dragY)>4;
+  drag=false; canvas.style.cursor='grab';
+  if (!moved) handleClick(e);
+});
+canvas.addEventListener('mouseleave', function(){
+  drag=false;
+  tipVisible = false;
+  // Небольшая задержка — даём время мыши перейти на тултип
+  setTimeout(function() {
+    if (!tipVisible) {
+      document.getElementById('tip').style.display = 'none';
+      tipDevId = null;
+    }
+  }, 80);
+});
+
+function devAt(cx,cy){
+  for (var i=0;i<mapData.devices.length;i++){
+    var d=mapData.devices[i], dx=d.x+ox-cx, dy=d.y+oy-cy;
+    if (Math.sqrt(dx*dx+dy*dy)<=32) return d;
+  }
+  return null;
+}
+
+// ── Tooltip с мини-графиком ───────────────────────────────────────────────────
+var tipDevId    = null;
+var tipHistory  = {};     // кэш: "devId:period" -> metrics
+var tipTimer    = null;
+var tipPeriod   = '5m';
+var tipVisible  = false;  // true если мышь над canvas ИЛИ над тултипом
+
+// Тултип: не скрываем пока мышь над ним самим
+document.getElementById('tip').addEventListener('mouseenter', function() {
+  tipVisible = true;
+});
+document.getElementById('tip').addEventListener('mouseleave', function() {
+  tipVisible = false;
+  document.getElementById('tip').style.display = 'none';
+  tipDevId = null;
+});
+
+// Кнопки периода — клик мышью
+document.querySelectorAll('.tip-period-btn').forEach(function(btn) {
+  btn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var period = this.getAttribute('data-period');
+    if (period === tipPeriod) return;
+    tipPeriod = period;
+    // Переключаем active-класс
+    document.querySelectorAll('.tip-period-btn').forEach(function(b) {
+      b.classList.toggle('active', b.getAttribute('data-period') === period);
+    });
+    // Перегружаем график для текущего устройства с новым периодом
+    if (tipDevId) {
+      document.getElementById('tip-chart-title').textContent = 'Загрузка...';
+      document.getElementById('tip-chart-wrap').style.display = 'block';
+      loadTipHistory(tipDevId, true);
+    }
+  });
+});
+
+function showTooltip(e) {
+  var tip = document.getElementById('tip');
+  var d   = devAt(e.offsetX, e.offsetY);
+
+  if (!d) {
+    // Не скрываем если мышь ушла на сам тултип
+    if (!tipVisible) {
+      tip.style.display = 'none';
+      tipDevId = null;
+      if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; }
+    }
+    return;
+  }
+
+  tipVisible = true;
+
+  // Базовая информация
+  var sc   = STATUS_COLOR[d.status] || '#8be9fd';
+  var html = '<b>' + escHtml(d.name) + '</b><br>'
+           + d.ip + '<br>'
+           + 'Status: <span style="color:' + sc + '">' + d.status + '</span>';
+  if (d.latency != null) html += '<br>Ping: ' + d.latency.toFixed(1) + ' ms';
+  if (d.last_checked)    html += '<br>' + d.last_checked;
+
+  if (d.snmp_info) {
+    Object.keys(d.snmp_info).forEach(function(k) {
+      var lo = k.toLowerCase();
+      if (lo.indexOf('temp') !== -1 || lo.indexOf('sensor') !== -1) {
+        html += '<br><span style="color:#f1fa8c">&#127777; ' + escHtml(k) + ': '
+              + escHtml(String(d.snmp_info[k])) + '</span>';
+      }
+    });
+  }
+
+  document.getElementById('tip-info').innerHTML = html;
+  tip.style.display = 'block';
+
+  // Позиция — не перемещаем если мышь уже над тултипом
+  var tx = e.clientX + 16, ty = e.clientY - 10;
+  if (tx + 340 > window.innerWidth)  tx = e.clientX - 340;
+  if (ty + 260 > window.innerHeight) ty = e.clientY - 260;
+  if (ty < 0) ty = 10;
+  tip.style.left = tx + 'px';
+  tip.style.top  = ty + 'px';
+
+  // Если устройство сменилось — загружаем историю
+  if (d.id !== tipDevId) {
+    tipDevId = d.id;
+    document.getElementById('tip-chart-wrap').style.display = 'none';
+    if (tipTimer) clearTimeout(tipTimer);
+    tipTimer = setTimeout(function() {
+      loadTipHistory(d.id, false);
+    }, CFG.tipDelay);
+  }
+}
+
+function loadTipHistory(devId, forceReload) {
+  var cacheKey = devId + ':' + tipPeriod;
+  if (!forceReload && tipHistory[cacheKey]) {
+    drawTipChart(devId, tipHistory[cacheKey]);
+    return;
+  }
+  // Запоминаем период и devId в момент запроса
+  var reqPeriod = tipPeriod;
+  var reqDevId  = devId;
+  fetch('/api/history/' + encodeURIComponent(devId) + '?period=' + reqPeriod)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok && data.metrics) {
+        var key = reqDevId + ':' + reqPeriod;
+        tipHistory[key] = data.metrics;
+        // Рисуем только если устройство и период всё ещё актуальны
+        if (tipDevId === reqDevId && tipPeriod === reqPeriod) {
+          drawTipChart(reqDevId, data.metrics);
+        }
+      } else {
+        document.getElementById('tip-chart-title').textContent =
+          data.error || 'Нет данных';
+      }
+    })
+    .catch(function(err) {
+      document.getElementById('tip-chart-title').textContent = 'Ошибка: ' + err.message;
+    });
+}
+
+function drawTipChart(devId, metrics) {
+  // Ищем температурные метрики
+  var tempKeys = Object.keys(metrics).filter(function(k) {
+    var lo = k.toLowerCase();
+    return lo.indexOf('temp') !== -1 || lo.indexOf('sensor') !== -1
+        || lo.indexOf('celsius') !== -1;
+  });
+
+  // Если нет температуры — берём любую числовую метрику (первую)
+  var chartKey = null, chartLabel = '';
+  if (tempKeys.length > 0) {
+    chartKey   = tempKeys[0];
+    chartLabel = '🌡 ' + chartKey;
+  } else {
+    var allKeys = Object.keys(metrics);
+    if (allKeys.length > 0) {
+      chartKey   = allKeys[0];
+      chartLabel = '📊 ' + chartKey;
+    }
+  }
+
+  if (!chartKey) return;
+
+  var pts  = metrics[chartKey];
+  var unit = pts.length ? pts[0].unit : '';
+  var vals = pts.map(function(p) { return p.v; });
+  var times = pts.map(function(p) { return p.ts; });
+
+  // Показываем блок
+  var wrap = document.getElementById('tip-chart-wrap');
+  wrap.style.display = 'block';
+  document.getElementById('tip-chart-title').textContent =
+    chartLabel + (unit ? '  (' + unit + ')' : '');
+
+  // Рисуем график
+  var cv  = document.getElementById('tip-chart');
+  var cx  = cv.getContext('2d');
+  var W   = cv.width, H = cv.height;
+  cx.clearRect(0, 0, W, H);
+
+  if (vals.length < 2) {
+    cx.fillStyle = '#666';
+    cx.font = '11px Consolas';
+    cx.textAlign = 'center';
+    cx.textBaseline = 'middle';
+    cx.fillText('Недостаточно данных', W/2, H/2);
+    return;
+  }
+
+  var minV = Math.min.apply(null, vals);
+  var maxV = Math.max.apply(null, vals);
+  if (maxV === minV) { minV -= 1; maxV += 1; }
+  var pad = { l:34, r:8, t:8, b:18 };
+  var gW  = W - pad.l - pad.r;
+  var gH  = H - pad.t - pad.b;
+
+  // Фон
+  cx.fillStyle = '#0d1020';
+  cx.fillRect(0, 0, W, H);
+
+  // Горизонтальные линии сетки (3 шт)
+  cx.strokeStyle = '#2a2a3a'; cx.lineWidth = 1;
+  for (var gi = 0; gi <= 2; gi++) {
+    var gy = pad.t + (gi / 2) * gH;
+    cx.beginPath(); cx.moveTo(pad.l, gy); cx.lineTo(W - pad.r, gy); cx.stroke();
+    // Подписи Y
+    var yVal = maxV - (gi / 2) * (maxV - minV);
+    cx.fillStyle = '#666'; cx.font = '9px Consolas';
+    cx.textAlign = 'right'; cx.textBaseline = 'middle';
+    cx.fillText(yVal.toFixed(1), pad.l - 3, gy);
+  }
+
+  // Градиент заливки под линией
+  var grad = cx.createLinearGradient(0, pad.t, 0, pad.t + gH);
+  // Цвет зависит от типа метрики
+  var isTemp = chartKey.toLowerCase().indexOf('temp') !== -1
+            || chartKey.toLowerCase().indexOf('sensor') !== -1;
+  var lineColor   = isTemp ? '#f1fa8c' : '#50fa7b';
+  var gradColor   = isTemp ? 'rgba(241,250,140,' : 'rgba(80,250,123,';
+  grad.addColorStop(0,   gradColor + '0.35)');
+  grad.addColorStop(1,   gradColor + '0.02)');
+
+  // Путь линии
+  cx.beginPath();
+  vals.forEach(function(v, i) {
+    var px = pad.l + (i / (vals.length - 1)) * gW;
+    var py = pad.t + (1 - (v - minV) / (maxV - minV)) * gH;
+    if (i === 0) cx.moveTo(px, py); else cx.lineTo(px, py);
+  });
+
+  // Заливка под линией
+  cx.lineTo(pad.l + gW, pad.t + gH);
+  cx.lineTo(pad.l,      pad.t + gH);
+  cx.closePath();
+  cx.fillStyle = grad;
+  cx.fill();
+
+  // Сама линия
+  cx.beginPath();
+  vals.forEach(function(v, i) {
+    var px = pad.l + (i / (vals.length - 1)) * gW;
+    var py = pad.t + (1 - (v - minV) / (maxV - minV)) * gH;
+    if (i === 0) cx.moveTo(px, py); else cx.lineTo(px, py);
+  });
+  cx.strokeStyle = lineColor; cx.lineWidth = 1.5;
+  cx.stroke();
+
+  // Точка последнего значения
+  var lastX = pad.l + gW;
+  var lastY = pad.t + (1 - (vals[vals.length-1] - minV) / (maxV - minV)) * gH;
+  cx.beginPath(); cx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+  cx.fillStyle = lineColor; cx.fill();
+
+  // Подпись последнего значения
+  cx.fillStyle = lineColor; cx.font = 'bold 9px Consolas';
+  cx.textAlign = 'right'; cx.textBaseline = 'bottom';
+  cx.fillText(vals[vals.length-1].toFixed(1) + (unit ? ' ' + unit : ''),
+              W - pad.r, pad.t + gH - 2);
+
+  // Ось X — время первой и последней точки
+  if (times.length >= 2) {
+    cx.fillStyle = '#555'; cx.font = '8px Consolas';
+    cx.textAlign = 'left';  cx.textBaseline = 'top';
+    cx.fillText(fmtTime(times[0]), pad.l, H - pad.b + 3);
+    cx.textAlign = 'right';
+    cx.fillText(fmtTime(times[times.length-1]), W - pad.r, H - pad.b + 3);
+  }
+}
+
+function fmtTime(ts) {
+  var d = new Date(ts * 1000);
+  var h = ('0'+d.getHours()).slice(-2);
+  var m = ('0'+d.getMinutes()).slice(-2);
+  // Для периодов больше суток показываем дату
+  if (tipPeriod === '1d' || tipPeriod === '1mo') {
+    var day = ('0'+d.getDate()).slice(-2);
+    var mon = ('0'+(d.getMonth()+1)).slice(-2);
+    return tipPeriod === '1mo'
+      ? day+'.'+mon
+      : day+'.'+mon+' '+h+':'+m;
+  }
+  return h + ':' + m;
+}
+
+function handleClick(e){
+  var d=devAt(e.offsetX,e.offsetY);
+  selId=d?d.id:null; draw(); renderList(); showDetail(d);
+}
+
+// ── Detail panel ─────────────────────────────────────────────────────────────
+function showDetail(d){
+  var el=document.getElementById('det');
+  if (!d){ el.innerHTML='<p style="color:#555;padding:8px">Click a device</p>'; return; }
+  var sc=STATUS_COLOR[d.status]||'#8be9fd';
+  var h='<h3>'+escHtml(d.name)+'</h3>';
+  var rows=[
+    ['IP',d.ip],
+    ['Status','<span style="color:'+sc+'">'+d.status+'</span>'],
+    ['Type',d.dtype],
+    ['Ping',d.latency!=null?d.latency.toFixed(1)+' ms':'&mdash;'],
+    ['Checked',d.last_checked||'&mdash;'],
+    ['Location',d.location||'&mdash;']
+  ];
+  rows.forEach(function(r){
+    h+='<div class="dr"><span class="dk">'+r[0]+'</span>'
+      +'<span class="dv">'+r[1]+'</span></div>';
+  });
+  if (d.snmp_info&&Object.keys(d.snmp_info).length){
+    h+='<div style="color:#264f78;padding:5px 0 2px;font-weight:bold">-- SNMP --</div>';
+    Object.keys(d.snmp_info).forEach(function(k){
+      h+='<div class="dr"><span class="dk">'+escHtml(k)+'</span>'
+        +'<span class="dv" style="color:#ffb454">'+escHtml(String(d.snmp_info[k]))+'</span></div>';
+    });
+  }
+  el.innerHTML=h;
+}
+
+// ── Device list ───────────────────────────────────────────────────────────────
+function renderList(){
+  var html='';
+  mapData.devices.forEach(function(d){
+    var sc=STATUS_COLOR[d.status]||'#8be9fd';
+    var lat=d.latency!=null?' '+d.latency.toFixed(0)+'ms':'';
+    html+='<div class="di'+(d.id===selId?' sel':'')+'" onclick="clickDevice(\''+d.id+'\')">'
+         +'<div class="dn"><span style="color:'+sc+'">&#9679;</span> '+escHtml(d.name)
+         +'<span style="color:'+sc+';font-size:10px">'+lat+'</span></div>'
+         +'<div class="dip">'+d.ip+' &mdash; '+d.dtype+'</div></div>';
+  });
+  document.getElementById('list').innerHTML=html;
+  document.getElementById('side-hdr').textContent=
+    'DEVICES  —  '+(currentTab||'...')+' ('+mapData.devices.length+')';
+}
+
+function clickDevice(id){
+  selId=id;
+  var found=null;
+  mapData.devices.forEach(function(d){ if(d.id===id) found=d; });
+  if (found){ ox=canvas.width/2-found.x; oy=canvas.height/2-found.y; }
+  draw(); renderList(); showDetail(found);
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+function loadMapForTab(tabName) {
+  var url = tabName ? '/api/map/'+encodeURIComponent(tabName) : '/api/map';
+  var su  = tabName ? '/api/stats/'+encodeURIComponent(tabName) : '/api/stats';
+
+  Promise.all([
+    fetch(url).then(function(r){ return r.json(); }),
+    fetch(su).then(function(r){ return r.json(); })
+  ]).then(function(res){
+    var map=res[0], st=res[1];
+    var tabChanged = (map.tab !== prevTabName);
+    var wasEmpty   = (!mapData.devices.length && map.devices.length > 0);
+    prevTabName    = map.tab;
+    mapData        = map;
+
+    if (wasEmpty || tabChanged) centerMap();
+
+    document.getElementById('s-on').textContent  = st.online  || 0;
+    document.getElementById('s-off').textContent = st.offline || 0;
+    document.getElementById('s-unk').textContent = st.unknown || 0;
+    document.getElementById('upd').textContent   = st.updated || '';
+
+    renderList();
+    var sel=null;
+    mapData.devices.forEach(function(d){ if(d.id===selId) sel=d; });
+    showDetail(sel);
+    draw();
+  }).catch(function(e){ console.error('loadMapForTab:', e); });
+}
+
+function loadTabs() {
+  fetch('/api/tabs').then(function(r){ return r.json(); })
+    .then(function(tabs){
+      allTabs = tabs;
+      // При первом запросе — выбираем активную карту
+      if (!currentTab) {
+        var active = tabs.filter(function(t){ return t.active; });
+        currentTab = active.length ? active[0].name : (tabs.length ? tabs[0].name : '');
+      }
+      renderTabs();
+    })
+    .catch(function(e){ console.error('loadTabs:', e); });
+}
+
+function loadAll() {
+  loadTabs();
+  loadMapForTab(currentTab);
+}
+
+// ── Старт ────────────────────────────────────────────────────────────────────
+document.getElementById('btn-refresh').addEventListener('click', loadAll);
+document.getElementById('btn-intervals').addEventListener('click', openIntervalsModal);
+document.getElementById('btn-logout').addEventListener('click', function(){
+  fetch('/api/logout').then(function(){ window.location.href = '/login'; });
+});
+window.addEventListener('resize', resize);
+
+// ── Zoom колесом мыши ─────────────────────────────────────────────────────────
+var scale = 1.0;
+canvas.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  var factor = e.deltaY < 0 ? 1.1 : 0.91;
+  var newScale = Math.max(0.2, Math.min(5.0, scale * factor));
+  // Масштабируем относительно позиции курсора
+  var rect = canvas.getBoundingClientRect();
+  var mx   = e.clientX - rect.left;
+  var my   = e.clientY - rect.top;
+  ox = mx - (mx - ox) * (newScale / scale);
+  oy = my - (my - oy) * (newScale / scale);
+  scale = newScale;
+  // Применяем scale ко всем устройствам через transform матрицу
+  mapData.devices.forEach(function(d){
+    d._sx = d.x; d._sy = d.y;
+  });
+  drawZoomed();
+}, { passive: false });
+
+function drawZoomed() {
+  // Сохраняем оригинальные координаты и применяем масштаб через ctx.scale
+  var w = canvas.width, h = canvas.height;
+  if (!w || !h) return;
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.scale(scale, scale);
+  // Пересчитываем offset с учётом scale
+  var sOx = ox / scale, sOy = oy / scale;
+  var savedOx = ox, savedOy = oy;
+  ox = sOx; oy = sOy;
+  draw();
+  ox = savedOx; oy = savedOy;
+  ctx.restore();
+}
+
+// Перегружаем draw чтобы учитывать scale при zoom
+var _origDraw = draw;
+draw = function() {
+  if (scale !== 1.0) {
+    drawZoomed();
+  } else {
+    _origDraw();
+  }
+};
+
+// Двойной клик — сброс zoom
+canvas.addEventListener('dblclick', function(e) {
+  var d = devAt(e.offsetX, e.offsetY);
+  if (!d) {
+    // Сбросить zoom
+    scale = 1.0;
+    centerMap();
+    draw();
+  }
+});
+
+// ── Поиск устройства ─────────────────────────────────────────────────────────
+var searchQuery = '';
+document.getElementById('search-inp').addEventListener('input', function() {
+  searchQuery = this.value.toLowerCase().trim();
+  renderList();
+  // Подсвечиваем найденное устройство на карте
+  if (searchQuery) {
+    var found = mapData.devices.filter(function(d) {
+      return d.name.toLowerCase().indexOf(searchQuery) !== -1
+          || d.ip.toLowerCase().indexOf(searchQuery) !== -1;
+    });
+    if (found.length === 1) {
+      // Единственное совпадение — центрируем
+      selId = found[0].id;
+      ox = canvas.width  / 2 - found[0].x;
+      oy = canvas.height / 2 - found[0].y;
+    } else {
+      selId = null;
+    }
+    draw();
+  } else {
+    selId = null;
+    draw();
+  }
+});
+
+// Фильтрация списка устройств по поиску
+var _origRenderList = renderList;
+renderList = function() {
+  var q = searchQuery;
+  var html = '';
+  var devices = mapData.devices;
+  if (q) {
+    devices = devices.filter(function(d) {
+      return d.name.toLowerCase().indexOf(q) !== -1
+          || d.ip.toLowerCase().indexOf(q) !== -1;
+    });
+  }
+  devices.forEach(function(d) {
+    var sc  = STATUS_COLOR[d.status] || '#8be9fd';
+    var lat = d.latency != null ? ' ' + d.latency.toFixed(0) + 'ms' : '';
+    var nm  = escHtml(d.name);
+    // Подсвечиваем совпадение
+    if (q) {
+      nm = nm.replace(
+        new RegExp('(' + escHtml(q) + ')', 'gi'),
+        '<mark style="background:#ffb86c;color:#1a1a2e;border-radius:2px">$1</mark>'
+      );
+    }
+    html += '<div class="di' + (d.id === selId ? ' sel' : '') + '" onclick="clickDevice(\'' + d.id + '\')">'
+          + '<div class="dn"><span style="color:' + sc + '">&#9679;</span> ' + nm
+          + '<span style="color:' + sc + ';font-size:10px">' + lat + '</span></div>'
+          + '<div class="dip">' + d.ip + ' &mdash; ' + d.dtype + '</div>'
+          + '</div>';
+  });
+  if (!html && q) {
+    html = '<div style="color:#555;padding:12px;font-size:12px">Ничего не найдено</div>';
+  }
+  document.getElementById('list').innerHTML = html;
+  document.getElementById('side-hdr').textContent =
+    'DEVICES  \u2014  ' + (currentTab || '...') + ' (' + mapData.devices.length + ')';
+};
+
+// ── Экспорт карты в PNG ───────────────────────────────────────────────────────
+document.getElementById('btn-png').addEventListener('click', function() {
+  // Создаём временный canvas для полной карты
+  var margin  = 40;
+  var devices = mapData.devices;
+  if (!devices.length) { alert('Нет устройств для экспорта'); return; }
+
+  var xs = devices.map(function(d){ return d.x + ox; });
+  var ys = devices.map(function(d){ return d.y + oy; });
+  var minX = Math.min.apply(null, xs) - margin;
+  var minY = Math.min.apply(null, ys) - margin - 20;
+  var maxX = Math.max.apply(null, xs) + margin + 120;
+  var maxY = Math.max.apply(null, ys) + margin + 120;
+
+  var tmpW = Math.max(800, maxX - minX);
+  var tmpH = Math.max(600, maxY - minY);
+
+  var tmp = document.createElement('canvas');
+  tmp.width  = tmpW;
+  tmp.height = tmpH;
+  var tc = tmp.getContext('2d');
+
+  // Фон
+  tc.fillStyle = '#1a1a2e';
+  tc.fillRect(0, 0, tmpW, tmpH);
+
+  // Сдвигаем чтобы всё поместилось
+  var dox = ox - minX, doy = oy - minY;
+
+  // Копируем логику draw() на tmpCanvas с нужным offset
+  var savedCtx = ctx, savedOx = ox, savedOy = oy;
+  // Переключаем ctx на tmp временно
+  ctx = tc;
+  ox  = dox;
+  oy  = doy;
+  scale = 1.0;
+  _origDraw();
+  // Возвращаем
+  ctx = savedCtx;
+  ox  = savedOx;
+  oy  = savedOy;
+
+  // Водяной знак
+  tc.fillStyle = 'rgba(255,184,108,0.3)';
+  tc.font = 'bold 14px Consolas';
+  tc.textAlign = 'right';
+  tc.textBaseline = 'bottom';
+  tc.fillText('NetMap Monitor  ' + new Date().toLocaleString(), tmpW - 10, tmpH - 6);
+
+  // Скачиваем
+  var link = document.createElement('a');
+  link.download = 'netmap_' + (currentTab || 'map') + '_'
+    + new Date().toISOString().slice(0,16).replace('T','_').replace(':','-') + '.png';
+  link.href = tmp.toDataURL('image/png');
+  link.click();
+});
+
+// ── Touch / мобильная поддержка (pinch-zoom + pan) ────────────────────────────
+var lastTouchDist = null;
+var lastTouchMid  = null;
+
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    drag   = true;
+    dragX  = e.touches[0].clientX;
+    dragY  = e.touches[0].clientY;
+    ox0    = ox; oy0 = oy;
+    lastTouchDist = null;
+  } else if (e.touches.length === 2) {
+    drag = false;
+    var t0 = e.touches[0], t1 = e.touches[1];
+    lastTouchDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    lastTouchMid  = {
+      x: (t0.clientX + t1.clientX) / 2,
+      y: (t0.clientY + t1.clientY) / 2
+    };
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 1 && drag) {
+    ox = ox0 + (e.touches[0].clientX - dragX);
+    oy = oy0 + (e.touches[0].clientY - dragY);
+    draw();
+  } else if (e.touches.length === 2 && lastTouchDist !== null) {
+    var t0   = e.touches[0], t1 = e.touches[1];
+    var dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    var mid  = { x:(t0.clientX+t1.clientX)/2, y:(t0.clientY+t1.clientY)/2 };
+    var factor   = dist / lastTouchDist;
+    var newScale = Math.max(0.2, Math.min(5.0, scale * factor));
+    var rect     = canvas.getBoundingClientRect();
+    var mx = mid.x - rect.left, my = mid.y - rect.top;
+    ox = mx - (mx - ox) * (newScale / scale);
+    oy = my - (my - oy) * (newScale / scale);
+    scale         = newScale;
+    lastTouchDist = dist;
+    lastTouchMid  = mid;
+    draw();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 0) {
+    drag = false;
+    lastTouchDist = null;
+  }
+}, { passive: false });
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 1: Звуковой алерт при Offline (Web Audio API)
+// ════════════════════════════════════════════════════════════════════════════
+var _prevStatuses = {};
+var _audioCtx = null;
+
+function playAlertSound(type) {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var osc  = _audioCtx.createOscillator();
+    var gain = _audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(_audioCtx.destination);
+    if (type === 'offline') {
+      osc.frequency.setValueAtTime(880, _audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(220, _audioCtx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.3, _audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + 0.5);
+    } else {
+      osc.frequency.setValueAtTime(440, _audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, _audioCtx.currentTime + 0.3);
+      gain.gain.setValueAtTime(0.2, _audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + 0.4);
+    }
+    osc.start(_audioCtx.currentTime);
+    osc.stop(_audioCtx.currentTime + 0.6);
+  } catch(e) {}
+}
+
+function checkStatusChanges(devices) {
+  devices.forEach(function(d) {
+    var prev = _prevStatuses[d.id];
+    if (prev !== undefined && prev !== d.status) {
+      if (d.status === 'Offline')  playAlertSound('offline');
+      if (d.status === 'Online')   playAlertSound('online');
+    }
+    _prevStatuses[d.id] = d.status;
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 2+3: Лог событий + Push Notifications
+// ════════════════════════════════════════════════════════════════════════════
+var _logFilter = '';
+
+document.getElementById('btn-log').addEventListener('click', function() {
+  document.getElementById('log-panel').classList.add('open');
+  loadEvents();
+});
+document.getElementById('log-close').addEventListener('click', function() {
+  document.getElementById('log-panel').classList.remove('open');
+});
+document.querySelectorAll('.log-fbtn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.querySelectorAll('.log-fbtn').forEach(function(b){ b.classList.remove('active'); });
+    this.classList.add('active');
+    _logFilter = this.getAttribute('data-type');
+    loadEvents();
+  });
+});
+
+function loadEvents() {
+  var url = '/api/events?limit=100' + (_logFilter ? '&type='+_logFilter : '');
+  fetch(url).then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (!data.ok) return;
+      var html = '';
+      data.events.forEach(function(e) {
+        var dt = new Date(e.ts * 1000);
+        var ts = ('0'+dt.getDate()).slice(-2)+'.'+('0'+(dt.getMonth()+1)).slice(-2)+' '
+               + ('0'+dt.getHours()).slice(-2)+':'+('0'+dt.getMinutes()).slice(-2);
+        var sev = e.severity || 'info';
+        html += '<div class="log-row">'
+              + '<span class="log-ts">'+ts+'</span>'
+              + '<span class="log-type sev-'+sev+'">'+escHtml(e.type)+'</span>'
+              + '<span class="log-msg">'
+              + (e.dev_name ? '<b>'+escHtml(e.dev_name)+'</b> ' : '')
+              + escHtml(e.msg)+'</span></div>';
+      });
+      document.getElementById('log-body').innerHTML = html ||
+        '<div style="color:#555;padding:16px;text-align:center">Нет событий</div>';
+    }).catch(function(){});
+}
+
+// Push Notifications
+function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+function sendBrowserNotification(title, body, type) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, {
+      body: body,
+      icon: type === 'offline' ? 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><circle cx=%2212%22 cy=%2212%22 r=%2210%22 fill=%22%23ff5555%22/></svg>' : undefined
+    });
+  }
+}
+function checkAndNotify(devices) {
+  devices.forEach(function(d) {
+    var prev = _prevStatuses[d.id];
+    if (prev !== undefined && prev !== d.status) {
+      if (d.status === 'Offline') {
+        sendBrowserNotification('NetMap: Устройство недоступно',
+          d.name + ' (' + d.ip + ') → OFFLINE', 'offline');
+      } else if (d.status === 'Online' && prev === 'Offline') {
+        sendBrowserNotification('NetMap: Устройство восстановлено',
+          d.name + ' (' + d.ip + ') → ONLINE', 'online');
+      }
+    }
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 4: Сравнение метрик на графике (две линии)
+// ════════════════════════════════════════════════════════════════════════════
+function drawTipChartMulti(devId, metrics) {
+  // Ищем пары In/Out или берём первые 2 метрики
+  var keys   = Object.keys(metrics);
+  var inKey  = keys.find(function(k){ return k.toLowerCase().indexOf('inoctets')  !== -1; });
+  var outKey = keys.find(function(k){ return k.toLowerCase().indexOf('outoctets') !== -1; });
+  var tempKey= keys.find(function(k){ var lo=k.toLowerCase(); return lo.indexOf('temp')!== -1||lo.indexOf('sensor')!==-1; });
+
+  // Приоритет: temp > in+out > первые 2
+  var series = [];
+  if (tempKey) {
+    series = [{ key: tempKey, color: '#f1fa8c', label: tempKey }];
+  } else if (inKey && outKey) {
+    series = [
+      { key: inKey,  color: '#50fa7b', label: 'IN'  },
+      { key: outKey, color: '#ffb86c', label: 'OUT' }
+    ];
+  } else if (keys.length >= 2) {
+    series = [
+      { key: keys[0], color: '#50fa7b', label: keys[0] },
+      { key: keys[1], color: '#ffb86c', label: keys[1] }
+    ];
+  } else if (keys.length === 1) {
+    series = [{ key: keys[0], color: '#50fa7b', label: keys[0] }];
+  }
+  if (!series.length) return;
+
+  var wrap = document.getElementById('tip-chart-wrap');
+  wrap.style.display = 'block';
+
+  // Заголовок с легендой
+  var legHtml = series.map(function(s){
+    return '<span style="color:'+s.color+';font-size:10px">&#9472; '+escHtml(s.label)+'</span>';
+  }).join('  ');
+  document.getElementById('tip-chart-title').innerHTML = legHtml;
+
+  var cv = document.getElementById('tip-chart');
+  var cx = cv.getContext('2d');
+  var W  = cv.width, H = cv.height;
+  cx.clearRect(0, 0, W, H);
+
+  // Общий диапазон времени
+  var allTs = [];
+  series.forEach(function(s) {
+    var pts = metrics[s.key] || [];
+    pts.forEach(function(p){ allTs.push(p.ts); });
+  });
+  if (!allTs.length) return;
+  var minTs = Math.min.apply(null, allTs);
+  var maxTs = Math.max.apply(null, allTs);
+  if (maxTs === minTs) maxTs = minTs + 1;
+
+  // Глобальный диапазон значений
+  var allVals = [];
+  series.forEach(function(s) {
+    (metrics[s.key]||[]).forEach(function(p){ allVals.push(p.v); });
+  });
+  var minV = Math.min.apply(null, allVals);
+  var maxV = Math.max.apply(null, allVals);
+  if (maxV === minV) { minV -= 1; maxV += 1; }
+
+  var pad = { l:34, r:8, t:8, b:18 };
+  var gW  = W - pad.l - pad.r;
+  var gH  = H - pad.t - pad.b;
+
+  // Фон + сетка
+  cx.fillStyle = '#0d1020'; cx.fillRect(0, 0, W, H);
+  cx.strokeStyle = '#2a2a3a'; cx.lineWidth = 1;
+  for (var gi = 0; gi <= 2; gi++) {
+    var gy = pad.t + (gi / 2) * gH;
+    cx.beginPath(); cx.moveTo(pad.l, gy); cx.lineTo(W-pad.r, gy); cx.stroke();
+    var yVal = maxV - (gi/2) * (maxV - minV);
+    cx.fillStyle = '#666'; cx.font = '9px Consolas';
+    cx.textAlign = 'right'; cx.textBaseline = 'middle';
+    cx.fillText(yVal.toFixed(1), pad.l - 3, gy);
+  }
+
+  // Рисуем каждую серию
+  series.forEach(function(s) {
+    var pts = (metrics[s.key] || []).filter(function(p){ return p.v !== null; });
+    if (pts.length < 2) return;
+    cx.beginPath();
+    pts.forEach(function(p, i) {
+      var px = pad.l + ((p.ts - minTs) / (maxTs - minTs)) * gW;
+      var py = pad.t + (1 - (p.v - minV) / (maxV - minV)) * gH;
+      if (i === 0) cx.moveTo(px, py); else cx.lineTo(px, py);
+    });
+    cx.strokeStyle = s.color; cx.lineWidth = 1.5; cx.stroke();
+    // Последняя точка
+    var last = pts[pts.length-1];
+    var lx = pad.l + ((last.ts - minTs) / (maxTs - minTs)) * gW;
+    var ly = pad.t + (1 - (last.v - minV) / (maxV - minV)) * gH;
+    cx.beginPath(); cx.arc(lx, ly, 3, 0, Math.PI*2);
+    cx.fillStyle = s.color; cx.fill();
+  });
+
+  // Ось X
+  cx.fillStyle = '#555'; cx.font = '8px Consolas';
+  cx.textAlign = 'left'; cx.textBaseline = 'top';
+  cx.fillText(fmtTime(minTs), pad.l, H - pad.b + 3);
+  cx.textAlign = 'right';
+  cx.fillText(fmtTime(maxTs), W - pad.r, H - pad.b + 3);
+}
+
+// Переопределяем drawTipChart чтобы использовать мульти-линии
+var _origDrawTipChart = drawTipChart;
+drawTipChart = function(devId, metrics) {
+  drawTipChartMulti(devId, metrics);
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 5: Backup
+// ════════════════════════════════════════════════════════════════════════════
+document.getElementById('btn-backup').addEventListener('click', function() {
+  window.location.href = '/api/backup';
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 6: Управление пользователями
+// ════════════════════════════════════════════════════════════════════════════
+var _myRole = 'viewer';
+
+function applyRole(role) {
+  _myRole = role || 'viewer';
+  var btn = document.getElementById('btn-users');
+  if (_myRole === 'admin') {
+    btn.style.opacity = '1';
+    btn.title = 'Управление пользователями';
+  } else {
+    btn.style.opacity = '0.4';
+    btn.title = 'Только для администратора';
+  }
+}
+
+// Загружаем роль сразу при старте
+function loadMyRole() {
+  fetch('/api/users').then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (data.ok) applyRole(data.my_role);
+    }).catch(function(){});
+}
+
+document.getElementById('btn-users').addEventListener('click', function() {
+  if (_myRole !== 'admin') {
+    alert('Доступ запрещён.\nТолько администратор может управлять пользователями.\n\nЛогин: admin / Пароль: admin');
+    return;
+  }
+  document.getElementById('users-panel').classList.add('open');
+  loadUsers();
+});
+
+function loadUsers() {
+  fetch('/api/users').then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (!data.ok) return;
+      applyRole(data.my_role);
+      var html = '';
+      data.users.forEach(function(u) {
+        html += '<div class="u-row">'
+              + '<span class="u-name">'+escHtml(u.username)+'</span>'
+              + '<span class="u-role role-'+u.role+'">'+u.role+'</span>'
+              + (u.username !== 'admin' ? '<button class="u-del" onclick="delUser(\''+escAttr(u.username)+'\')">&#10005;</button>' : '<span></span>')
+              + '</div>';
+      });
+      document.getElementById('users-list').innerHTML = html;
+    });
+}
+
+function addUser() {
+  var name = document.getElementById('u-name').value.trim();
+  var pw   = document.getElementById('u-pw').value;
+  var role = document.getElementById('u-role').value;
+  var err  = document.getElementById('users-err');
+  if (!name || pw.length < 4) { err.textContent = 'Минимум 4 символа в пароле'; return; }
+  fetch('/api/users', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({username: name, password: pw, role: role})
+  }).then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.ok) { err.textContent=''; loadUsers(); document.getElementById('u-name').value=''; document.getElementById('u-pw').value=''; }
+      else err.textContent = d.error || 'Ошибка';
+    });
+}
+
+function delUser(uname) {
+  if (!confirm('Удалить пользователя '+uname+'?')) return;
+  fetch('/api/users/'+encodeURIComponent(uname), {method:'DELETE'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d.ok) loadUsers(); });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 7: Force-directed auto layout
+// ════════════════════════════════════════════════════════════════════════════
+document.getElementById('btn-layout').addEventListener('click', function() {
+  if (!mapData.devices.length) return;
+  forceLayout(mapData.devices, mapData.connections);
+});
+
+function forceLayout(devices, connections) {
+  var W = canvas.width / 2, H = canvas.height / 2;
+  var nodes = {};
+  devices.forEach(function(d) {
+    nodes[d.id] = { x: d.x, y: d.y, vx: 0, vy: 0 };
+  });
+
+  var REPEL   = 8000;
+  var ATTRACT = 0.05;
+  var IDEAL   = 160;
+  var DAMP    = 0.85;
+  var ITERS   = 120;
+
+  for (var iter = 0; iter < ITERS; iter++) {
+    // Отталкивание между всеми узлами
+    var ids = Object.keys(nodes);
+    for (var i = 0; i < ids.length; i++) {
+      for (var j = i+1; j < ids.length; j++) {
+        var a = nodes[ids[i]], b = nodes[ids[j]];
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        var force = REPEL / (dist * dist);
+        var fx = (dx/dist)*force, fy = (dy/dist)*force;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+    // Притяжение по рёбрам
+    connections.forEach(function(c) {
+      var a = nodes[c.from], b = nodes[c.to];
+      if (!a || !b) return;
+      var dx = b.x - a.x, dy = b.y - a.y;
+      var dist = Math.sqrt(dx*dx + dy*dy) || 1;
+      var force = ATTRACT * (dist - IDEAL);
+      var fx = (dx/dist)*force, fy = (dy/dist)*force;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    });
+    // Притяжение к центру
+    ids.forEach(function(id) {
+      var n = nodes[id];
+      n.vx += (W - n.x) * 0.01;
+      n.vy += (H - n.y) * 0.01;
+    });
+    // Применяем скорость с затуханием
+    ids.forEach(function(id) {
+      var n = nodes[id];
+      n.x += n.vx; n.y += n.vy;
+      n.vx *= DAMP; n.vy *= DAMP;
+    });
+  }
+  // Применяем координаты к устройствам
+  devices.forEach(function(d) {
+    var n = nodes[d.id];
+    d.x = Math.round(n.x);
+    d.y = Math.round(n.y);
+  });
+  centerMap();
+  draw();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 8: Кастомные иконки (emoji по dtype)
+// ════════════════════════════════════════════════════════════════════════════
+var DTYPE_EMOJI = {
+  router:  '\u{1F310}',  // 🌐
+  switch:  '\u{1F500}',  // 🔀
+  server:  '\u{1F5A5}',  // 🖥
+  pc:      '\u{1F4BB}',  // 💻
+  printer: '\u{1F5A8}',  // 🖨
+  camera:  '\u{1F4F7}',  // 📷
+  phone:   '\u{1F4DE}',  // 📞
+  ups:     '\u{1F50B}',  // 🔋
+  other:   '\u{1F4E1}'   // 📡
+};
+
+// Перегружаем отрисовку устройств чтобы рисовать emoji
+var _origDrawDeviceIcon = null;  // patch в draw()
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 9: Тёмная/светлая тема
+// ════════════════════════════════════════════════════════════════════════════
+var _isLight = false;
+document.getElementById('btn-theme').addEventListener('click', function() {
+  _isLight = !_isLight;
+  document.body.classList.toggle('light-theme', _isLight);
+  this.textContent = _isLight ? '\u2600 Тема' : '\u2601 Тема';
+  // Перерисовываем с новым цветом фона
+  draw();
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 10: Поиск по значениям SNMP-метрик
+// ════════════════════════════════════════════════════════════════════════════
+// Расширяем уже существующий поиск — добавляем фильтр по snmp_info значениям
+var _origSearchFilter = null;  // хранится как closure в renderList выше
+// Дополняем renderList — snmp-поиск
+document.getElementById('search-inp').addEventListener('input', function() {
+  var q = this.value.toLowerCase().trim();
+  // Дополнительно: подсвечиваем устройства с совпадением SNMP
+  mapData.devices.forEach(function(d) {
+    d._snmpMatch = false;
+    if (q && d.snmp_info) {
+      Object.entries(d.snmp_info).forEach(function(kv) {
+        if (String(kv[0]).toLowerCase().indexOf(q) !== -1 ||
+            String(kv[1]).toLowerCase().indexOf(q) !== -1) {
+          d._snmpMatch = true;
+        }
+      });
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 11: Копирование карты в буфер (Clipboard API)
+// ════════════════════════════════════════════════════════════════════════════
+document.getElementById('btn-clip').addEventListener('click', function() {
+  var tmp    = document.createElement('canvas');
+  tmp.width  = canvas.width;
+  tmp.height = canvas.height;
+  var tc = tmp.getContext('2d');
+  tc.drawImage(canvas, 0, 0);
+  tmp.toBlob(function(blob) {
+    if (!blob) { alert('Не удалось создать изображение'); return; }
+    try {
+      var item = new ClipboardItem({'image/png': blob});
+      navigator.clipboard.write([item]).then(function() {
+        document.getElementById('btn-clip').textContent = '\u2713 Скопировано';
+        setTimeout(function(){ document.getElementById('btn-clip').innerHTML = '&#128203; Копировать'; }, 2000);
+      }).catch(function(e) { alert('Ошибка буфера: ' + e.message); });
+    } catch(e) { alert('Clipboard API недоступен в этом браузере'); }
+  }, 'image/png');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 12: Статистика в боковой панели
+// ════════════════════════════════════════════════════════════════════════════
+function loadSummary() {
+  fetch('/api/summary').then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (!data.ok || !data.data) return;
+      var d = data.data;
+      var bar = document.getElementById('summary-bar');
+      bar.classList.add('open');
+      document.getElementById('sum-in').textContent  = d.total_in    || '—';
+      document.getElementById('sum-out').textContent = d.total_out   || '—';
+      document.getElementById('sum-lat').textContent = d.avg_latency != null ? d.avg_latency + ' ms' : '—';
+      document.getElementById('sum-max').textContent = d.max_latency != null ? d.max_latency + ' ms' : '—';
+      var pct = d.devices_total ? Math.round(d.devices_online/d.devices_total*100) : 0;
+      document.getElementById('sum-onl').textContent = pct + '%';
+    }).catch(function(){});
+}
+
+// Подгоняем canvas под наличие summary bar
+function adjustWrapForSummary() {
+  var bar    = document.getElementById('summary-bar');
+  var isOpen = bar.classList.contains('open');
+  var bh     = isOpen ? bar.offsetHeight : 0;
+  document.getElementById('wrap').style.bottom = bh + 'px';
+  document.getElementById('ann-layer').style.bottom = bh + 'px';
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 13: Аннотации на карте
+// ════════════════════════════════════════════════════════════════════════════
+var _annotations = [];
+var _annMode     = false;
+
+document.getElementById('btn-ann').addEventListener('click', function() {
+  _annMode = !_annMode;
+  this.style.background = _annMode ? '#ffb86c' : '';
+  this.style.color      = _annMode ? '#1a1a2e' : '';
+  canvas.style.cursor   = _annMode ? 'crosshair' : 'grab';
+});
+
+canvas.addEventListener('click', function(e) {
+  if (!_annMode) return;
+  var text = prompt('Текст заметки:');
+  if (!text) return;
+  var ann = { id: Date.now(), text: text, cx: e.offsetX, cy: e.offsetY };
+  _annotations.push(ann);
+  renderAnnotations();
+  _annMode = false;
+  document.getElementById('btn-ann').style.background = '';
+  document.getElementById('btn-ann').style.color = '';
+  canvas.style.cursor = 'grab';
+});
+
+function renderAnnotations() {
+  var layer = document.getElementById('ann-layer');
+  layer.innerHTML = '';
+  _annotations.forEach(function(ann) {
+    var el = document.createElement('div');
+    el.className = 'ann-item';
+    el.style.left = ann.cx + 'px';
+    el.style.top  = ann.cy + 'px';
+    el.innerHTML  = escHtml(ann.text)
+      + '<span class="ann-del" onclick="delAnnotation('+ann.id+')">&#10005;</span>';
+    // Перетаскивание
+    el.addEventListener('mousedown', function(e) {
+      e.stopPropagation();
+      var startX = e.clientX - ann.cx, startY = e.clientY - ann.cy;
+      function onMove(ev) {
+        ann.cx = ev.clientX - startX;
+        ann.cy = ev.clientY - startY;
+        el.style.left = ann.cx + 'px';
+        el.style.top  = ann.cy + 'px';
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    layer.appendChild(el);
+  });
+}
+
+function delAnnotation(id) {
+  _annotations = _annotations.filter(function(a){ return a.id !== id; });
+  renderAnnotations();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Обновляем loadMapForTab чтобы вызывать все новые функции
+// ════════════════════════════════════════════════════════════════════════════
+var _origLoadMapForTab = loadMapForTab;
+loadMapForTab = function(tabName) {
+  var url = tabName ? '/api/map/'+encodeURIComponent(tabName) : '/api/map';
+  var su  = tabName ? '/api/stats/'+encodeURIComponent(tabName) : '/api/stats';
+
+  Promise.all([
+    fetch(url).then(function(r){ return r.json(); }),
+    fetch(su).then(function(r){ return r.json(); })
+  ]).then(function(res){
+    var map = res[0], st = res[1];
+    var tabChanged = (map.tab !== prevTabName);
+    var wasEmpty   = (!mapData.devices.length && map.devices.length > 0);
+    prevTabName    = map.tab;
+
+    // Звук + уведомления при смене статуса
+    checkStatusChanges(map.devices);
+    checkAndNotify(map.devices);
+
+    mapData = map;
+    if (wasEmpty || tabChanged) centerMap();
+
+    // Роль пользователя
+    if (st.role) applyRole(st.role);
+
+    document.getElementById('s-on').textContent  = st.online  || 0;
+    document.getElementById('s-off').textContent = st.offline || 0;
+    document.getElementById('s-unk').textContent = st.unknown || 0;
+    document.getElementById('upd').textContent   = st.updated || '';
+
+    renderList();
+    var sel = null;
+    mapData.devices.forEach(function(d){ if(d.id===selId) sel=d; });
+    showDetail(sel);
+    draw();
+
+    // Обновляем статистику
+    loadSummary();
+    adjustWrapForSummary();
+  }).catch(function(e){ console.error('loadMapForTab:', e); });
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// ЗАДАЧА 14: SSE вместо polling (Server-Sent Events)
+// ════════════════════════════════════════════════════════════════════════════
+var _sse        = null;
+var _sseActive  = false;
+var _sseRetries = 0;
+
+function startSSE() {
+  if (_sse) { _sse.close(); _sse = null; }
+  _sse = new EventSource('/api/stream');
+  _sseActive = true;
+
+  // Первый снимок — полная карта
+  _sse.addEventListener('init', function(e) {
+    var d = JSON.parse(e.data);
+    checkStatusChanges(d.map.devices);
+    checkAndNotify(d.map.devices);
+    mapData    = d.map;
+    var st     = d.stats;
+    if (st.role) _myRole = st.role;
+    document.getElementById('s-on').textContent  = st.online  || 0;
+    document.getElementById('s-off').textContent = st.offline || 0;
+    document.getElementById('s-unk').textContent = st.unknown || 0;
+    document.getElementById('upd').textContent   = st.updated || '';
+    if (!currentTab && d.map.tab) {
+      currentTab = d.map.tab;
+    }
+    centerMap();
+    renderList();
+    loadTabs();
+    draw();
+    loadSummary();
+    adjustWrapForSummary();
+    _sseRetries = 0;
+    // Обновляем индикатор в тулбаре
+    document.getElementById('upd').style.color = '#50fa7b';
+    document.getElementById('upd').title = 'Live (SSE)';
+  });
+
+  // Частичные обновления — только изменившиеся устройства
+  _sse.addEventListener('update', function(e) {
+    var d = JSON.parse(e.data);
+    checkStatusChanges(d.changes);
+    checkAndNotify(d.changes);
+    // Обновляем только изменившиеся устройства без полной перезагрузки
+    d.changes.forEach(function(upd) {
+      for (var i = 0; i < mapData.devices.length; i++) {
+        if (mapData.devices[i].id === upd.id) {
+          mapData.devices[i].status       = upd.status;
+          mapData.devices[i].latency      = upd.latency;
+          mapData.devices[i].last_checked = upd.last_checked;
+          mapData.devices[i].snmp_info    = upd.snmp_info;
+          break;
+        }
+      }
+    });
+    // Пересчитываем счётчики
+    var online = 0, offline = 0, unknown = 0;
+    mapData.devices.forEach(function(d) {
+      if      (d.status === 'Online')  online++;
+      else if (d.status === 'Offline') offline++;
+      else                              unknown++;
+    });
+    document.getElementById('s-on').textContent  = online;
+    document.getElementById('s-off').textContent = offline;
+    document.getElementById('s-unk').textContent = unknown;
+    document.getElementById('upd').textContent   = new Date().toLocaleTimeString();
+    renderList();
+    var sel = null;
+    mapData.devices.forEach(function(dv){ if(dv.id===selId) sel=dv; });
+    showDetail(sel);
+    draw();
+    loadSummary();
+  });
+
+  // ping — keepalive, ничего не делаем
+  _sse.addEventListener('ping', function() {});
+
+  _sse.onerror = function() {
+    _sseActive = false;
+    _sse.close();
+    _sse = null;
+    document.getElementById('upd').style.color = '#f1fa8c';
+    document.getElementById('upd').title = 'Reconnecting...';
+    _sseRetries++;
+    // Экспоненциальная задержка: 1s, 2s, 4s, 8s, max 30s
+    var delay = Math.min(1000 * Math.pow(2, _sseRetries - 1), 30000);
+    setTimeout(function() {
+      if (!_sseActive) startSSE();
+    }, delay);
+    // Fallback polling пока SSE не восстановится
+    loadAll();
+  };
+}
+
+window.addEventListener('load', function(){
+  resize();
+  requestNotificationPermission();
+  loadMyRole();   // ← загружаем роль до любых кликов
+  loadAll();
+  // Запускаем SSE — если браузер поддерживает
+  if (typeof EventSource !== 'undefined') {
+    startSSE();
+    // SSE заменяет polling — но оставляем редкий polling для вкладок
+    applyMapInterval();
+  } else {
+    // Fallback для старых браузеров
+    applyMapInterval();
+  }
+});
+</script>
+</body>
+</html>
+
+

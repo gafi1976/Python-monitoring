@@ -24,6 +24,7 @@ from collections import deque
 from tkinter import filedialog
 from snmp_lld import LLDDialog
 from connection_label import ConnectionLabelManager, ConnectionLabelDialog
+import web_server
     
 
 # ── pysnmp 7.x asyncio API ───────────────────────────────────────────────────
@@ -61,7 +62,8 @@ DEVICE_ICONS = {
     "printer": "🖨️", "camera": "📷", "phone": "📞", "ups": "🔋", "other": "📡",
 }
 
-DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "network_data.json")
+DATA_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "network_data.json")
+SESSION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "session.json")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -232,6 +234,11 @@ class NetworkMapApp:
         self.monitor_thread: Optional[threading.Thread] = None
         self.result_queue = queue.Queue()
         self.conn_labels = ConnectionLabelManager()
+        self.conn_labels.start_polling()   # автономный SNMP-опрос меток на линиях
+
+        # Режим соединения
+        self.connect_mode = False
+        self.connect_first = None
 
         # UI элементы
         self._build_ui()
@@ -260,7 +267,102 @@ class NetworkMapApp:
     #  Управление вкладками
     # ──────────────────────────────────────────────────────────────────────────
 
+    # ──────────────────────────────────────────────────────────────────────────
+    #  Сессия — сохранение и восстановление открытых вкладок
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _save_session(self):
+        """Сохраняет список открытых вкладок в session.json."""
+        try:
+            session = {
+                "current_tab": self.current_tab_name,
+                "tabs": []
+            }
+            for name, tab in self.tabs.items():
+                # Сохраняем только вкладки с файлом на диске
+                # Вкладки без файла (новые несохранённые) — пропускаем
+                if tab.file_path and os.path.exists(tab.file_path):
+                    session["tabs"].append({
+                        "name":      name,
+                        "file_path": tab.file_path,
+                    })
+                elif name == "Основная":
+                    # Основная карта всегда сохраняется в DATA_PATH
+                    session["tabs"].append({
+                        "name":      name,
+                        "file_path": DATA_PATH,
+                    })
+            with open(SESSION_PATH, "w", encoding="utf-8") as f:
+                json.dump(session, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[Session] Не удалось сохранить сессию: {e}")
+
+    def _restore_session(self) -> bool:
+        """
+        Восстанавливает все вкладки из session.json.
+        Возвращает True если хоть одна вкладка загружена успешно.
+        """
+        if not os.path.exists(SESSION_PATH):
+            return False
+        try:
+            with open(SESSION_PATH, encoding="utf-8") as f:
+                session = json.load(f)
+        except Exception as e:
+            print(f"[Session] Не удалось прочитать session.json: {e}")
+            return False
+
+        tabs_info  = session.get("tabs", [])
+        active_tab = session.get("current_tab", "")
+        loaded     = 0
+
+        for entry in tabs_info:
+            name      = entry.get("name", "")
+            file_path = entry.get("file_path", "")
+            if not name or not file_path:
+                continue
+            if not os.path.exists(file_path):
+                print(f"[Session] Файл не найден, пропускаем: {file_path}")
+                continue
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                map_data = MapData(name, file_path)
+                map_data.from_dict(data)
+                self.tabs[name] = map_data
+                # Основные настройки берём из первой карты
+                if loaded == 0:
+                    self.tg_token   = data.get("telegram_token", "")
+                    self.tg_chat_id = data.get("telegram_chat_id", "")
+                    self.alert_on_offline.set(data.get("alert_on_offline", True))
+                    self.alert_on_online.set(data.get("alert_on_online", True))
+                    self.conn_labels.from_dict(data.get("conn_labels", {}))
+                    self._update_tg_dot()
+                loaded += 1
+                print(f"[Session] Загружена карта '{name}' из {file_path}")
+            except Exception as e:
+                print(f"[Session] Ошибка загрузки '{name}': {e}")
+
+        if loaded == 0:
+            return False
+
+        # Восстанавливаем активную вкладку
+        if active_tab and active_tab in self.tabs:
+            self.current_tab_name = active_tab
+        else:
+            self.current_tab_name = next(iter(self.tabs.keys()))
+
+        self._refresh_tab_bar()
+        self._update_title()
+        self._set_status(
+            f"Сессия восстановлена: {loaded} карт{'а' if loaded==1 else 'ы' if 2<=loaded<=4 else ''}"
+        )
+        return True
+
     def _init_first_tab(self):
+        # Сначала пробуем восстановить сессию (все открытые вкладки)
+        if self._restore_session():
+            return
+        # Иначе — стандартная загрузка одной основной карты
         if os.path.exists(DATA_PATH):
             try:
                 with open(DATA_PATH, encoding="utf-8") as f:
@@ -322,7 +424,11 @@ class NetworkMapApp:
             self.current_tab_name = tab_name
             self._refresh_tab_bar()
             self._select_tab(tab_name)
+            # Загружаем метки на линиях из файла
+            if "conn_labels" in data:
+                self.conn_labels.from_dict(data["conn_labels"])
             self._update_title()
+            self._save_session()   # ← сохраняем сессию после открытия карты
             self._set_status(f"Открыта карта '{tab_name}' ({len(map_data.devices)} устройств)")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось открыть файл:\n{e}", parent=self.root)
@@ -368,10 +474,11 @@ class NetworkMapApp:
         data["telegram_chat_id"] = self.tg_chat_id
         data["alert_on_offline"] = self.alert_on_offline.get()
         data["alert_on_online"] = self.alert_on_online.get()
-        data["conn_labels"] = self.conn_labels.to_dict()  # ← ДОБАВИТЬ
+        data["conn_labels"] = self.conn_labels.to_dict()
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         self._set_status(f"Сохранено: {os.path.basename(path)}")
+        self._save_session()   # ← обновляем сессию после сохранения
 
     def _close_tab(self, tab_name: str):
         if len(self.tabs) == 1:
@@ -388,6 +495,7 @@ class NetworkMapApp:
         self._refresh_tab_bar()
         self._select_tab(self.current_tab_name)
         self._update_title()
+        self._save_session()   # ← сохраняем сессию после закрытия вкладки
 
     def _rename_tab(self, tab_name: str):
         new_name = simpledialog.askstring("Переименовать", "Новое имя вкладки:",
@@ -404,6 +512,7 @@ class NetworkMapApp:
             self.current_tab_name = new_name
         self._refresh_tab_bar()
         self._update_title()
+        self._save_session()   # ← сохраняем сессию после переименования
 
     def _refresh_tab_bar(self):
         for widget in self.tab_bar.winfo_children():
@@ -436,6 +545,10 @@ class NetworkMapApp:
         self._draw_all()
         if was_monitoring:
             self._toggle_monitoring()
+        # Обновляем устройства для автономного опроса меток на линиях
+        tab = self.tabs.get(name)
+        if tab:
+            self.conn_labels.update_devices(tab.devices)
         self._update_title()
         self._set_status(f"Переключено на карту '{name}'")
 
@@ -465,6 +578,11 @@ class NetworkMapApp:
     def connections(self) -> List[Tuple[str, str]]:
         tab = self.current_tab
         return tab.connections if tab else []
+
+    @connections.setter
+    def connections(self, val):
+        if self.current_tab:
+            self.current_tab.connections = val
 
     @property
     def canvas_offset(self) -> List[int]:
@@ -501,7 +619,6 @@ class NetworkMapApp:
 
         for text, cmd, color in [
             ("➕ Добавить",    self._add_device,          C["accent2"]),
-            ("🔗 Соединить",   self._toggle_connect_mode, C["accent"]),
             ("✂️ Разъединить", self._disconnect_selected, C["warning"]),
             ("🗑 Удалить",     self._delete_selected,     C["danger"]),
         ]:
@@ -510,6 +627,14 @@ class NetworkMapApp:
                       activebackground=C["border"], activeforeground=color,
                       relief="flat", bd=0, font=("Consolas", 10),
                       padx=12, pady=6, cursor="hand2").pack(side="left", padx=4, pady=8)
+
+        self.btn_connect = tk.Button(tb, text="🔗 Соединить",
+                      command=self._toggle_connect_mode,
+                      bg=C["bg3"], fg=C["accent"],
+                      activebackground=C["border"], activeforeground=C["accent"],
+                      relief="flat", bd=0, font=("Consolas", 10),
+                      padx=12, pady=6, cursor="hand2")
+        self.btn_connect.pack(side="left", padx=4, pady=8)
 
         # Кнопка сканирования
         tk.Button(tb, text="🔍 Сканировать сеть",
@@ -526,6 +651,15 @@ class NetworkMapApp:
                   activebackground=C["border"],
                   relief="flat", bd=0, font=("Consolas", 10),
                   padx=12, pady=6, cursor="hand2").pack(side="left", padx=4, pady=8)
+
+        # Кнопка Веб-сервер
+        self.btn_web = tk.Button(tb, text="🌐 Веб",
+                  command=self._toggle_web_server,
+                  bg=C["bg3"], fg="#c792ea",
+                  activebackground=C["border"],
+                  relief="flat", bd=0, font=("Consolas", 10),
+                  padx=12, pady=6, cursor="hand2")
+        self.btn_web.pack(side="left", padx=4, pady=8)
 
         # Кнопка отчёта
         tk.Button(tb, text="📊 Отчёт",
@@ -842,7 +976,7 @@ class NetworkMapApp:
 
     def _on_canvas_click(self, event):
         dev_id = self._get_device_at(event.x, event.y)
-        if hasattr(self, 'connect_mode') and self.connect_mode:
+        if self.connect_mode:
             if dev_id:
                 if self.connect_first is None:
                     self.connect_first = dev_id
@@ -851,7 +985,7 @@ class NetworkMapApp:
                     conn, rev = (self.connect_first, dev_id), (dev_id, self.connect_first)
                     if conn not in self.connections and rev not in self.connections:
                         self._snapshot()
-                        self.connections.append(conn)
+                        self.connections = self.connections + [conn]
                     self.connect_first = None
                     self._toggle_connect_mode()
                     self._draw_all()
@@ -1020,10 +1154,15 @@ class NetworkMapApp:
     def _toggle_connect_mode(self):
         self.connect_mode = not self.connect_mode
         self.connect_first = None
+        C = COLORS
         if self.connect_mode:
             self.connect_label.place(relx=0.5, y=8, anchor="n")
+            self.btn_connect.config(bg=C["accent"], fg=C["bg"])
+            self._set_status("🔗 Режим соединения: кликните на первое устройство")
         else:
             self.connect_label.place_forget()
+            self.btn_connect.config(bg=C["bg3"], fg=C["accent"])
+            self._set_status("Готово")
 
     def _disconnect_selected(self):
         if hasattr(self, 'selected_device') and self.selected_device:
@@ -1049,7 +1188,7 @@ class NetworkMapApp:
 
     def _import_scanned_devices(self, found_ips: list[str]):
         self._snapshot()
-        import uuid
+        import uuid, socket
         w = self.canvas.winfo_width()
         cols = max(1, int((w - 100) // 120))
         existing = {d.ip for d in self.devices.values()}
@@ -1058,7 +1197,12 @@ class NetworkMapApp:
             if ip in existing:
                 continue
             dev_id = str(uuid.uuid4())[:8]
-            dev = Device(dev_id=dev_id, name=f"Host-{ip.split('.')[-1]}", ip=ip,
+            # Пробуем определить имя хоста по IP
+            try:
+                hostname = socket.gethostbyaddr(ip)[0].split(".")[0]
+            except (socket.herror, socket.gaierror, OSError):
+                hostname = f"Host-{ip.split('.')[-1]}"
+            dev = Device(dev_id=dev_id, name=hostname, ip=ip,
                          x=80 + (added % cols) * 130 - self.canvas_offset[0],
                          y=100 + (added // cols) * 130 - self.canvas_offset[1])
             self.devices[dev_id] = dev
@@ -1070,6 +1214,177 @@ class NetworkMapApp:
     # ──────────────────────────────────────────────────────────────────────────
     #  Telegram настройки
     # ──────────────────────────────────────────────────────────────────────────
+
+    def _toggle_web_server(self):
+        C = COLORS
+        srv = web_server._server_instance
+        if srv and srv.running:
+            # Остановить
+            web_server.stop_server()
+            self.btn_web.config(bg=C["bg3"], fg="#c792ea", text="🌐 Веб")
+            self._set_status("Веб-сервер остановлен")
+        else:
+            # Запустить
+            if not web_server.FLASK_OK:
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Flask не установлен",
+                    "Установите Flask командой:\n\n  pip install flask\n\nи перезапустите программу.",
+                    parent=self.root
+                )
+                return
+            s = web_server.get_or_create(self, host="0.0.0.0", port=5050)
+            ok, url = s.start() if not s.running else (True, f"http://localhost:5050")
+            if ok:
+                self.btn_web.config(bg="#c792ea", fg=C["bg"], text="🌐 Стоп")
+                self._set_status(f"Веб-сервер запущен → {url}")
+                # Показать диалог с адресом
+                self._show_web_dialog(url)
+            else:
+                from tkinter import messagebox
+                messagebox.showerror("Ошибка", url, parent=self.root)
+
+    def _show_web_dialog(self, url: str):
+        """Диалог с адресом веб-сервера и QR-кодом."""
+        C = COLORS
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Веб-сервер запущен")
+        dlg.geometry("420x220")
+        dlg.configure(bg=C["bg"])
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+
+        tk.Label(dlg, text="🌐 Веб-сервер запущен",
+                 font=("Consolas", 13, "bold"),
+                 bg=C["bg"], fg=C["accent"]).pack(pady=(18, 6))
+
+        tk.Label(dlg,
+                 text="Откройте в браузере на любом компьютере в сети:",
+                 font=("Consolas", 9), bg=C["bg"], fg=C["text_dim"]).pack()
+
+        # Показываем реальный IP
+        import socket
+        try:
+            local_ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            local_ip = "localhost"
+        full_url = f"http://{local_ip}:5050"
+
+        url_var = tk.StringVar(value=full_url)
+        url_entry = tk.Entry(dlg, textvariable=url_var,
+                             font=("Consolas", 12, "bold"),
+                             bg=C["bg3"], fg=C["accent"],
+                             relief="flat", justify="center",
+                             highlightthickness=1,
+                             highlightbackground=C["border"],
+                             state="readonly")
+        url_entry.pack(fill="x", padx=24, pady=10)
+
+        def copy_url():
+            dlg.clipboard_clear()
+            dlg.clipboard_append(full_url)
+            copy_btn.config(text="✓ Скопировано!")
+            dlg.after(2000, lambda: copy_btn.config(text="📋 Копировать"))
+
+        bf = tk.Frame(dlg, bg=C["bg"])
+        bf.pack(pady=4)
+        copy_btn = tk.Button(bf, text="📋 Копировать", command=copy_url,
+                             bg=C["bg3"], fg=C["text"],
+                             relief="flat", bd=0, font=("Consolas", 10),
+                             padx=12, pady=5, cursor="hand2")
+        copy_btn.pack(side="left", padx=6)
+        tk.Button(bf, text="🔐 Сменить пароль",
+                  command=lambda: self._change_web_password(dlg),
+                  bg=C["bg3"], fg=C["warning"],
+                  relief="flat", bd=0, font=("Consolas", 10),
+                  padx=12, pady=5, cursor="hand2").pack(side="left", padx=6)
+        tk.Button(bf, text="Закрыть", command=dlg.destroy,
+                  bg=C["bg3"], fg=C["text_dim"],
+                  relief="flat", bd=0, font=("Consolas", 10),
+                  padx=12, pady=5, cursor="hand2").pack(side="left", padx=6)
+
+        tk.Label(dlg,
+                 text=f"Логин: admin  |  Пароль по умолчанию: admin\n"
+                      f"Карта обновляется автоматически каждые 5 секунд",
+                 font=("Consolas", 8), bg=C["bg"], fg=C["text_dim"]).pack(pady=(4, 0))
+
+    def _change_web_password(self, parent=None):
+        """Диалог смены логина и пароля веб-сервера."""
+        C = COLORS
+        win = tk.Toplevel(parent or self.root)
+        win.title("Сменить пароль веб-сервера")
+        win.geometry("360x280")
+        win.configure(bg=C["bg"])
+        win.transient(parent or self.root)
+        win.grab_set()
+        win.resizable(False, False)
+
+        tk.Label(win, text="🔐 Учётные данные веб-сервера",
+                 font=("Consolas", 12, "bold"),
+                 bg=C["bg"], fg=C["accent"]).pack(pady=(18, 10))
+
+        f = tk.Frame(win, bg=C["bg"])
+        f.pack(padx=24, fill="x")
+        f.columnconfigure(1, weight=1)
+
+        def lbl_entry(row, text, show=""):
+            tk.Label(f, text=text, font=("Consolas", 10),
+                     bg=C["bg"], fg=C["text_dim"], anchor="w"
+                     ).grid(row=row, column=0, sticky="w", pady=6)
+            var = tk.StringVar()
+            e = tk.Entry(f, textvariable=var, show=show,
+                         font=("Consolas", 10), bg=C["bg3"], fg=C["text"],
+                         relief="flat", highlightthickness=1,
+                         highlightbackground=C["border"],
+                         highlightcolor=C["accent"])
+            e.grid(row=row, column=1, sticky="ew", pady=6, padx=(8, 0))
+            return var
+
+        # Текущие данные
+        srv = web_server._server_instance
+        cur_user = list(srv.credentials.keys())[0] if srv else "admin"
+
+        user_var = lbl_entry(0, "Логин:")
+        user_var.set(cur_user)
+        pass_var  = lbl_entry(1, "Новый пароль:", show="•")
+        pass2_var = lbl_entry(2, "Повторить:", show="•")
+
+        err_lbl = tk.Label(win, text="", font=("Consolas", 9),
+                           bg=C["bg"], fg=C["danger"])
+        err_lbl.pack()
+
+        def save():
+            username = user_var.get().strip()
+            pw1 = pass_var.get()
+            pw2 = pass2_var.get()
+            if not username:
+                err_lbl.config(text="Введите логин")
+                return
+            if len(pw1) < 4:
+                err_lbl.config(text="Пароль должен быть не менее 4 символов")
+                return
+            if pw1 != pw2:
+                err_lbl.config(text="Пароли не совпадают")
+                return
+            # Применяем к серверу
+            srv = web_server._server_instance
+            if srv:
+                srv.set_credentials(username, pw1)
+                # Сбрасываем все сессии — всем нужно перелогиниться
+                web_server._sessions.clear()
+            self._set_status(f"Пароль веб-сервера изменён для пользователя '{username}'")
+            win.destroy()
+
+        bf = tk.Frame(win, bg=C["bg"])
+        bf.pack(pady=10)
+        tk.Button(bf, text="Отмена", command=win.destroy,
+                  bg=C["bg3"], fg=C["text_dim"],
+                  relief="flat", bd=0, font=("Consolas", 10),
+                  padx=12, pady=5, cursor="hand2").pack(side="left", padx=6)
+        tk.Button(bf, text="💾 Сохранить", command=save,
+                  bg=C["accent2"], fg="white",
+                  relief="flat", bd=0, font=("Consolas", 10, "bold"),
+                  padx=14, pady=5, cursor="hand2").pack(side="left", padx=6)
 
     def _open_telegram_settings(self):
         C = COLORS
@@ -1379,6 +1694,14 @@ class NetworkMapApp:
             if triggered and (now - last) > 300:
                 oid_cfg["last_alert"] = now
                 self._send_snmp_trigger_alert(dev, label, numeric, condition, threshold, raw_value)
+                reporter.history_db.add_event(
+                    event_type="snmp_trigger",
+                    message=f"{label} = {raw_value} {condition} {threshold}",
+                    device_id=dev.dev_id,
+                    device_name=dev.name,
+                    device_ip=dev.ip,
+                    severity="warning"
+                )
 
     def _extract_number(self, s: str) -> Optional[float]:
         match = re.search(r"[-+]?\d*\.?\d+", str(s))
@@ -1449,6 +1772,17 @@ class NetworkMapApp:
                                     prev if prev is not None else DeviceStatus.UNKNOWN,
                                     new_status
                                 )
+                                # Логируем событие
+                                sev = "critical" if new_status == DeviceStatus.OFFLINE else "info"
+                                prev_str = prev.value if prev else "Unknown"
+                                reporter.history_db.add_event(
+                                    event_type="status_change",
+                                    message=f"{prev_str} → {new_status.value}",
+                                    device_id=dev_id,
+                                    device_name=dev.name,
+                                    device_ip=dev.ip,
+                                    severity=sev
+                                )
                         tab._prev_stable[dev_id] = new_status
                     dev.status = new_status
                     dev.latency = result.get("latency")
@@ -1467,6 +1801,9 @@ class NetworkMapApp:
         finally:
             self._refresh_device_list()
             self._draw_all()
+            # Обновляем ссылку на устройства для автономного опроса меток
+            if self.current_tab:
+                self.conn_labels.update_devices(self.current_tab.devices)
             self.root.after(1000, self._process_queue)
 
     def _send_telegram_alert(self, dev_name: str, ip: str,
@@ -1558,6 +1895,9 @@ class NetworkMapApp:
 
     def on_close(self):
         self.monitoring_active = False
+        self.conn_labels.stop_polling()
+        web_server.stop_server()
+        self._save_session()   # ← сохраняем текущую сессию перед выходом
         if messagebox.askyesno("Выход", "Сохранить изменения?", parent=self.root):
             self._save_current_map()
         self.root.destroy()

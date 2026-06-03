@@ -1,9 +1,19 @@
-"""Device settings dialog with SNMP triggers and factor (coefficient)"""
-
 import tkinter as tk
 from tkinter import ttk
+import threading
+import socket
 from device import Device
 from snmp_lld import LLDDialog
+
+
+def resolve_hostname(ip: str) -> str:
+    """Определяет имя хоста по IP. Возвращает имя или пустую строку."""
+    try:
+        name = socket.gethostbyaddr(ip)[0]
+        # Берём только короткое имя (без домена)
+        return name.split(".")[0]
+    except (socket.herror, socket.gaierror, OSError):
+        return ""
 
 
 class DeviceSettingsDialog:
@@ -95,7 +105,30 @@ class DeviceSettingsDialog:
         row += 1
 
         tk.Label(general_tab, text="IP адрес:", bg=C["bg"], fg=C["text_dim"], anchor="w").grid(row=row, column=0, sticky="w", pady=5)
-        tk.Entry(general_tab, textvariable=self.var_ip, bg=C["bg3"], fg=C["text"], insertbackground=C["text"], borderwidth=1, relief="flat").grid(row=row, column=1, sticky="ew", padx=10, pady=5)
+
+        ip_frame = tk.Frame(general_tab, bg=C["bg"])
+        ip_frame.grid(row=row, column=1, sticky="ew", padx=10, pady=5)
+        ip_frame.columnconfigure(0, weight=1)
+
+        tk.Entry(ip_frame, textvariable=self.var_ip, bg=C["bg3"], fg=C["text"],
+                 insertbackground=C["text"], borderwidth=1, relief="flat"
+                 ).grid(row=0, column=0, sticky="ew")
+
+        self._resolve_btn = tk.Button(
+            ip_frame, text="🔍",
+            bg=C["bg3"], fg=C["accent"],
+            relief="flat", bd=0, cursor="hand2",
+            font=("Consolas", 11),
+            command=self._resolve_name,
+            padx=4
+        )
+        self._resolve_btn.grid(row=0, column=1, padx=(4, 0))
+
+        self._resolve_lbl = tk.Label(
+            ip_frame, text="", bg=C["bg"],
+            fg=C["text_dim"], font=("Consolas", 9)
+        )
+        self._resolve_lbl.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         row += 1
 
         tk.Label(general_tab, text="Тип устройства:", bg=C["bg"], fg=C["text_dim"], anchor="w").grid(row=row, column=0, sticky="w", pady=5)
@@ -263,6 +296,46 @@ class DeviceSettingsDialog:
                   command=self._save, width=12, relief="flat").pack(side="right", padx=15)
         tk.Button(dlg_btns, text="Отмена", bg=C["bg3"], fg=C["text"], font=("Consolas", 10),
                   command=self.dialog.destroy, width=10, relief="flat").pack(side="right")
+
+    def _resolve_name(self):
+        """Определяет имя хоста по IP в фоновом потоке."""
+        ip = self.var_ip.get().strip()
+        if not ip:
+            return
+        self._resolve_btn.config(state="disabled", text="⏳")
+        self._resolve_lbl.config(text="Определяем имя...", fg=self.colors["text_dim"])
+
+        def _worker():
+            name = resolve_hostname(ip)
+            # Обновляем UI из основного потока
+            self.dialog.after(0, lambda: self._on_resolved(name))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_resolved(self, name: str):
+        """Вызывается в основном потоке после получения имени."""
+        C = self.colors
+        self._resolve_btn.config(state="normal", text="🔍")
+        if name:
+            self._resolve_lbl.config(
+                text=f"✅ Найдено: {name}  (нажмите чтобы применить)",
+                fg=C["accent2"], cursor="hand2"
+            )
+            self._resolve_lbl.bind("<Button-1>",
+                lambda e, n=name: self._apply_resolved_name(n))
+        else:
+            self._resolve_lbl.config(
+                text="⚠ Имя не найдено (нет DNS / NetBIOS)",
+                fg=C["warning"], cursor=""
+            )
+
+    def _apply_resolved_name(self, name: str):
+        """Подставляет найденное имя в поле «Имя устройства»."""
+        self.var_name.set(name)
+        self._resolve_lbl.config(
+            text=f"✅ Применено: {name}",
+            fg=self.colors["text_dim"], cursor=""
+        )
 
     # Вспомогательные методы
     def _update_ping_label(self):

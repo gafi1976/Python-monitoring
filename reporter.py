@@ -49,6 +49,60 @@ class HistoryDB:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_device_time ON snmp_history(device_id, timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_metric ON snmp_history(metric_name)")
+            # Таблица лога событий
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS event_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    event_type TEXT NOT NULL,
+                    device_id TEXT,
+                    device_name TEXT,
+                    device_ip TEXT,
+                    message TEXT,
+                    severity TEXT DEFAULT 'info'
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_event_time ON event_log(timestamp)")
+
+    # ── Лог событий ────────────────────────────────────────────────────────────
+
+    def add_event(self, event_type: str, message: str,
+                  device_id: str = "", device_name: str = "",
+                  device_ip: str = "", severity: str = "info",
+                  timestamp: float = None):
+        """Добавляет событие в лог (status_change, snmp_trigger, snmp_error, info)."""
+        if timestamp is None:
+            timestamp = datetime.datetime.now().timestamp()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT INTO event_log (timestamp, event_type, device_id, device_name, device_ip, message, severity)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (timestamp, event_type, device_id, device_name, device_ip, message, severity))
+
+    def get_events(self, limit: int = 200, event_type: str = None,
+                   start_ts: float = None) -> List[dict]:
+        """Возвращает последние события из лога."""
+        query  = "SELECT timestamp, event_type, device_id, device_name, device_ip, message, severity FROM event_log WHERE 1=1"
+        params = []
+        if event_type:
+            query  += " AND event_type = ?"
+            params.append(event_type)
+        if start_ts:
+            query  += " AND timestamp >= ?"
+            params.append(start_ts)
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [{"ts": r[0], "type": r[1], "dev_id": r[2],
+                 "dev_name": r[3], "dev_ip": r[4],
+                 "msg": r[5], "severity": r[6]} for r in rows]
+
+    def purge_old_events(self, max_age_days: int = 30):
+        """Удаляет события старше max_age_days дней."""
+        cutoff = datetime.datetime.now().timestamp() - max_age_days * 86400
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM event_log WHERE timestamp < ?", (cutoff,))
 
     def add_record(self, device_id: str, metric_name: str, raw_value: str,
                    numeric_value: Optional[float], unit: str, timestamp: float = None):
@@ -59,6 +113,23 @@ class HistoryDB:
                 INSERT INTO snmp_history (device_id, timestamp, metric_name, raw_value, numeric_value, unit)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (device_id, timestamp, metric_name, raw_value, numeric_value, unit))
+
+    def purge_old_records(self, max_age_days: int = 90):
+        """Удаляет записи старше max_age_days дней. Вызывать периодически."""
+        cutoff = datetime.datetime.now().timestamp() - max_age_days * 86400
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute(
+                "DELETE FROM snmp_history WHERE timestamp < ?", (cutoff,)
+            )
+            deleted = cur.rowcount
+        return deleted
+
+    def get_db_size_mb(self) -> float:
+        """Размер файла базы данных в МБ."""
+        try:
+            return os.path.getsize(self.db_path) / (1024 * 1024)
+        except OSError:
+            return 0.0
 
     def get_metrics_for_device(self, device_id: str, metric_name: str = None,
                                 start_ts: float = None, end_ts: float = None,
@@ -88,6 +159,19 @@ class HistoryDB:
             return [row[0] for row in cur.fetchall()]
 
 history_db = HistoryDB()
+
+# Авто-очистка: удаляем записи старше 90 дней при запуске
+def _auto_purge():
+    """Запускается в фоне при старте — удаляет устаревшие записи."""
+    try:
+        deleted = history_db.purge_old_records(max_age_days=90)
+        if deleted:
+            print(f"[History] Удалено {deleted} устаревших записей (>90 дней)")
+    except Exception as e:
+        print(f"[History] Ошибка очистки: {e}")
+
+import threading as _threading
+_threading.Thread(target=_auto_purge, daemon=True).start()
 
 def store_snmp_data(dev: Device, snmp_data: dict):
     """Сохраняет все числовые SNMP-метрики устройства в БД."""
