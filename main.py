@@ -62,7 +62,8 @@ DEVICE_ICONS = {
     "printer": "🖨️", "camera": "📷", "phone": "📞", "ups": "🔋", "other": "📡",
 }
 
-DATA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "network_data.json")
+DATA_PATH    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "network_data.json")
+SESSION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "session.json")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -266,7 +267,102 @@ class NetworkMapApp:
     #  Управление вкладками
     # ──────────────────────────────────────────────────────────────────────────
 
+    # ──────────────────────────────────────────────────────────────────────────
+    #  Сессия — сохранение и восстановление открытых вкладок
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _save_session(self):
+        """Сохраняет список открытых вкладок в session.json."""
+        try:
+            session = {
+                "current_tab": self.current_tab_name,
+                "tabs": []
+            }
+            for name, tab in self.tabs.items():
+                # Сохраняем только вкладки с файлом на диске
+                # Вкладки без файла (новые несохранённые) — пропускаем
+                if tab.file_path and os.path.exists(tab.file_path):
+                    session["tabs"].append({
+                        "name":      name,
+                        "file_path": tab.file_path,
+                    })
+                elif name == "Основная":
+                    # Основная карта всегда сохраняется в DATA_PATH
+                    session["tabs"].append({
+                        "name":      name,
+                        "file_path": DATA_PATH,
+                    })
+            with open(SESSION_PATH, "w", encoding="utf-8") as f:
+                json.dump(session, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[Session] Не удалось сохранить сессию: {e}")
+
+    def _restore_session(self) -> bool:
+        """
+        Восстанавливает все вкладки из session.json.
+        Возвращает True если хоть одна вкладка загружена успешно.
+        """
+        if not os.path.exists(SESSION_PATH):
+            return False
+        try:
+            with open(SESSION_PATH, encoding="utf-8") as f:
+                session = json.load(f)
+        except Exception as e:
+            print(f"[Session] Не удалось прочитать session.json: {e}")
+            return False
+
+        tabs_info  = session.get("tabs", [])
+        active_tab = session.get("current_tab", "")
+        loaded     = 0
+
+        for entry in tabs_info:
+            name      = entry.get("name", "")
+            file_path = entry.get("file_path", "")
+            if not name or not file_path:
+                continue
+            if not os.path.exists(file_path):
+                print(f"[Session] Файл не найден, пропускаем: {file_path}")
+                continue
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                map_data = MapData(name, file_path)
+                map_data.from_dict(data)
+                self.tabs[name] = map_data
+                # Основные настройки берём из первой карты
+                if loaded == 0:
+                    self.tg_token   = data.get("telegram_token", "")
+                    self.tg_chat_id = data.get("telegram_chat_id", "")
+                    self.alert_on_offline.set(data.get("alert_on_offline", True))
+                    self.alert_on_online.set(data.get("alert_on_online", True))
+                    self.conn_labels.from_dict(data.get("conn_labels", {}))
+                    self._update_tg_dot()
+                loaded += 1
+                print(f"[Session] Загружена карта '{name}' из {file_path}")
+            except Exception as e:
+                print(f"[Session] Ошибка загрузки '{name}': {e}")
+
+        if loaded == 0:
+            return False
+
+        # Восстанавливаем активную вкладку
+        if active_tab and active_tab in self.tabs:
+            self.current_tab_name = active_tab
+        else:
+            self.current_tab_name = next(iter(self.tabs.keys()))
+
+        self._refresh_tab_bar()
+        self._update_title()
+        self._set_status(
+            f"Сессия восстановлена: {loaded} карт{'а' if loaded==1 else 'ы' if 2<=loaded<=4 else ''}"
+        )
+        return True
+
     def _init_first_tab(self):
+        # Сначала пробуем восстановить сессию (все открытые вкладки)
+        if self._restore_session():
+            return
+        # Иначе — стандартная загрузка одной основной карты
         if os.path.exists(DATA_PATH):
             try:
                 with open(DATA_PATH, encoding="utf-8") as f:
@@ -332,6 +428,7 @@ class NetworkMapApp:
             if "conn_labels" in data:
                 self.conn_labels.from_dict(data["conn_labels"])
             self._update_title()
+            self._save_session()   # ← сохраняем сессию после открытия карты
             self._set_status(f"Открыта карта '{tab_name}' ({len(map_data.devices)} устройств)")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось открыть файл:\n{e}", parent=self.root)
@@ -377,10 +474,11 @@ class NetworkMapApp:
         data["telegram_chat_id"] = self.tg_chat_id
         data["alert_on_offline"] = self.alert_on_offline.get()
         data["alert_on_online"] = self.alert_on_online.get()
-        data["conn_labels"] = self.conn_labels.to_dict()  # ← ДОБАВИТЬ
+        data["conn_labels"] = self.conn_labels.to_dict()
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         self._set_status(f"Сохранено: {os.path.basename(path)}")
+        self._save_session()   # ← обновляем сессию после сохранения
 
     def _close_tab(self, tab_name: str):
         if len(self.tabs) == 1:
@@ -397,6 +495,7 @@ class NetworkMapApp:
         self._refresh_tab_bar()
         self._select_tab(self.current_tab_name)
         self._update_title()
+        self._save_session()   # ← сохраняем сессию после закрытия вкладки
 
     def _rename_tab(self, tab_name: str):
         new_name = simpledialog.askstring("Переименовать", "Новое имя вкладки:",
@@ -413,6 +512,7 @@ class NetworkMapApp:
             self.current_tab_name = new_name
         self._refresh_tab_bar()
         self._update_title()
+        self._save_session()   # ← сохраняем сессию после переименования
 
     def _refresh_tab_bar(self):
         for widget in self.tab_bar.winfo_children():
@@ -1772,7 +1872,8 @@ class NetworkMapApp:
     def on_close(self):
         self.monitoring_active = False
         self.conn_labels.stop_polling()
-        web_server.stop_server()   # останавливаем Flask если запущен
+        web_server.stop_server()
+        self._save_session()   # ← сохраняем текущую сессию перед выходом
         if messagebox.askyesno("Выход", "Сохранить изменения?", parent=self.root):
             self._save_current_map()
         self.root.destroy()
