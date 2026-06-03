@@ -285,7 +285,7 @@ function draw() {
     });
     if (ll.length) {
       var lines = ll.map(function(l){
-        var sh = l.label.replace(/ \[.*?\]$/,'');
+        var sh = l.label.replace(/ \\[.*?\\]$/,'');
         return sh + ': ' + (l.value!=null ? l.value+(l.unit?' '+l.unit:'') : '...');
       });
       drawBox(mx, my, lines);
