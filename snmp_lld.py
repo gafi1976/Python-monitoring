@@ -607,9 +607,11 @@ class LLDDialog:
         if "metric" not in tags:
             return
 
-        if col == "#5":    # dev — 5-й столбец (0-based: #0,key,value,note,dev,line → #5=dev, #6=line)
+        # columns=("key","value","note","dev","line")
+        # #0=tree, #1=key, #2=value, #3=note, #4=dev, #5=line
+        if col == "#4":
             field = "dev"
-        elif col == "#6":  # line
+        elif col == "#5":
             field = "line"
         else:
             return
