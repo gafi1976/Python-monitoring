@@ -105,6 +105,35 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
   display:block; border-radius:4px;
   background:#0d1020; border:1px solid #2d2d44;
 }
+/* ── Intervals modal ── */
+#modal-overlay {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,0.6); z-index:100;
+  align-items:center; justify-content:center;
+}
+#modal-overlay.open { display:flex; }
+#modal {
+  background:#23233a; border:1px solid #444466; border-radius:10px;
+  padding:22px 26px; min-width:320px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.7);
+}
+#modal h2 { color:#ffb86c; font-size:14px; margin-bottom:18px; }
+.mrow { margin-bottom:14px; }
+.mrow label { display:block; font-size:12px; color:#b0b0d0; margin-bottom:5px; }
+.mrow input[type=range] { width:100%; accent-color:#ffb86c; }
+.mrow .mval {
+  display:inline-block; font-size:13px; color:#fff;
+  font-weight:bold; margin-left:8px; min-width:36px;
+}
+.mbtns { display:flex; gap:10px; margin-top:20px; justify-content:flex-end; }
+.mbtn {
+  background:#2d2d44; border:1px solid #444466; color:#ffb86c;
+  padding:6px 16px; border-radius:5px; cursor:pointer;
+  font-family:inherit; font-size:12px;
+}
+.mbtn:hover { background:#444466; }
+.mbtn.primary { background:#ffb86c; color:#1a1a2e; border-color:#ffb86c; font-weight:bold; }
+.mbtn.primary:hover { background:#ffd08c; }
 </style>
 </head>
 <body>
@@ -116,6 +145,7 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
   <div class="badge"><span style="color:#ff5555">&#9679;</span>&nbsp;Offline:&nbsp;<b id="s-off">0</b></div>
   <div class="badge"><span style="color:#8be9fd">&#9679;</span>&nbsp;Unknown:&nbsp;<b id="s-unk">0</b></div>
   <button class="tbtn" id="btn-refresh">&#8635; Refresh</button>
+  <button class="tbtn" id="btn-intervals" title="Настройка интервалов">&#9201; Интервалы</button>
   <span id="upd"></span>
 </div>
 
@@ -140,8 +170,95 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
   </div>
 </div>
 
+<!-- Intervals modal -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h2>&#9201; Настройка интервалов</h2>
+
+    <div class="mrow">
+      <label>Автообновление карты:
+        <span class="mval" id="val-map">5 с</span>
+      </label>
+      <input type="range" id="rng-map" min="2" max="60" step="1" value="5">
+    </div>
+
+    <div class="mrow">
+      <label>Задержка загрузки графика (наведение):
+        <span class="mval" id="val-tip">0.4 с</span>
+      </label>
+      <input type="range" id="rng-tip" min="0" max="2000" step="100" value="400">
+    </div>
+
+    <div class="mrow">
+      <label>Глубина истории для графика (точек):
+        <span class="mval" id="val-pts">60</span>
+      </label>
+      <input type="range" id="rng-pts" min="10" max="200" step="10" value="60">
+    </div>
+
+    <div class="mbtns">
+      <button class="mbtn" id="btn-modal-cancel">Отмена</button>
+      <button class="mbtn primary" id="btn-modal-ok">&#10003; Применить</button>
+    </div>
+  </div>
+</div>
+
 <script>
-// ── Константы ────────────────────────────────────────────────────────────────
+// ── Настройки интервалов (изменяются через диалог) ───────────────────────────
+var CFG = {
+  mapInterval:  5000,   // мс — автообновление карты
+  tipDelay:     400,    // мс — задержка появления графика в тултипе
+  historyLimit: 60      // кол-во точек для графика в тултипе
+};
+
+var _mapTimer = null;  // id текущего setInterval карты
+
+function applyMapInterval() {
+  if (_mapTimer) clearInterval(_mapTimer);
+  _mapTimer = setInterval(function(){
+    loadTabs();
+    loadMapForTab(currentTab);
+  }, CFG.mapInterval);
+}
+
+// ── Модал интервалов ──────────────────────────────────────────────────────────
+function openIntervalsModal() {
+  var overlay = document.getElementById('modal-overlay');
+  document.getElementById('rng-map').value = CFG.mapInterval / 1000;
+  document.getElementById('val-map').textContent = (CFG.mapInterval/1000) + ' с';
+  document.getElementById('rng-tip').value = CFG.tipDelay;
+  document.getElementById('val-tip').textContent = (CFG.tipDelay/1000).toFixed(1) + ' с';
+  document.getElementById('rng-pts').value = CFG.historyLimit;
+  document.getElementById('val-pts').textContent = CFG.historyLimit;
+  overlay.classList.add('open');
+}
+
+document.getElementById('rng-map').addEventListener('input', function(){
+  document.getElementById('val-map').textContent = this.value + ' с';
+});
+document.getElementById('rng-tip').addEventListener('input', function(){
+  document.getElementById('val-tip').textContent = (this.value/1000).toFixed(1) + ' с';
+});
+document.getElementById('rng-pts').addEventListener('input', function(){
+  document.getElementById('val-pts').textContent = this.value;
+});
+document.getElementById('btn-modal-cancel').addEventListener('click', function(){
+  document.getElementById('modal-overlay').classList.remove('open');
+});
+document.getElementById('btn-modal-ok').addEventListener('click', function(){
+  CFG.mapInterval  = parseInt(document.getElementById('rng-map').value) * 1000;
+  CFG.tipDelay     = parseInt(document.getElementById('rng-tip').value);
+  CFG.historyLimit = parseInt(document.getElementById('rng-pts').value);
+  tipHistory = {};  // сбрасываем кэш — будет загружено с новым лимитом
+  applyMapInterval();
+  document.getElementById('modal-overlay').classList.remove('open');
+});
+// Закрыть по клику на оверлей
+document.getElementById('modal-overlay').addEventListener('click', function(e){
+  if (e.target === this) this.classList.remove('open');
+});
+
+
 var STATUS_COLOR = {
   'Online':      '#50fa7b',
   'Offline':     '#ff5555',
@@ -485,24 +602,23 @@ function showTooltip(e) {
   tip.style.left = tx + 'px';
   tip.style.top  = ty + 'px';
 
-  // Если устройство сменилось — загружаем историю с задержкой 400ms
+  // Если устройство сменилось — загружаем историю с задержкой CFG.tipDelay
   if (d.id !== tipDevId) {
     tipDevId = d.id;
     document.getElementById('tip-chart-wrap').style.display = 'none';
     if (tipTimer) clearTimeout(tipTimer);
     tipTimer = setTimeout(function() {
-      loadTipHistory(d.id, e);
-    }, 400);
+      loadTipHistory(d.id);
+    }, CFG.tipDelay);
   }
 }
 
-function loadTipHistory(devId, e) {
-  // Если кэш есть — используем сразу
+function loadTipHistory(devId) {
   if (tipHistory[devId]) {
     drawTipChart(devId, tipHistory[devId]);
     return;
   }
-  fetch('/api/history/' + encodeURIComponent(devId))
+  fetch('/api/history/' + encodeURIComponent(devId) + '?limit=' + CFG.historyLimit)
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok && data.metrics) {
@@ -760,15 +876,13 @@ function loadAll() {
 
 // ── Старт ────────────────────────────────────────────────────────────────────
 document.getElementById('btn-refresh').addEventListener('click', loadAll);
+document.getElementById('btn-intervals').addEventListener('click', openIntervalsModal);
 window.addEventListener('resize', resize);
 
 window.addEventListener('load', function(){
   resize();
   loadAll();
-  setInterval(function(){
-    loadTabs();
-    loadMapForTab(currentTab);
-  }, 5000);
+  applyMapInterval();   // запускаем таймер с CFG.mapInterval
 });
 </script>
 </body>

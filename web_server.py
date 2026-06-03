@@ -181,17 +181,18 @@ class NetMapWebServer:
         }
 
     def _history(self, dev_id):
-        """История SNMP метрик для графика. Возвращает все числовые метрики."""
+        """История SNMP метрик для графика. Принимает ?limit=N из запроса."""
         try:
+            from flask import request
+            limit = int(request.args.get('limit', 60))
+            limit = max(10, min(limit, 500))
             import reporter
-            # Получаем все имена метрик устройства
             names = reporter.history_db.get_all_metric_names(dev_id)
             result = {}
             for name in names:
                 rows = reporter.history_db.get_metrics_for_device(
-                    dev_id, metric_name=name, limit=60
+                    dev_id, metric_name=name, limit=limit
                 )
-                # Берём только числовые значения, сортируем по времени
                 pts = []
                 for r in rows:
                     ts, mn, raw, num, unit = r
