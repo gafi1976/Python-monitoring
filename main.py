@@ -1188,14 +1188,98 @@ class NetworkMapApp:
                              relief="flat", bd=0, font=("Consolas", 10),
                              padx=12, pady=5, cursor="hand2")
         copy_btn.pack(side="left", padx=6)
+        tk.Button(bf, text="🔐 Сменить пароль",
+                  command=lambda: self._change_web_password(dlg),
+                  bg=C["bg3"], fg=C["warning"],
+                  relief="flat", bd=0, font=("Consolas", 10),
+                  padx=12, pady=5, cursor="hand2").pack(side="left", padx=6)
         tk.Button(bf, text="Закрыть", command=dlg.destroy,
                   bg=C["bg3"], fg=C["text_dim"],
                   relief="flat", bd=0, font=("Consolas", 10),
                   padx=12, pady=5, cursor="hand2").pack(side="left", padx=6)
 
         tk.Label(dlg,
-                 text="Карта обновляется автоматически каждые 5 секунд",
+                 text=f"Логин: admin  |  Пароль по умолчанию: admin\n"
+                      f"Карта обновляется автоматически каждые 5 секунд",
                  font=("Consolas", 8), bg=C["bg"], fg=C["text_dim"]).pack(pady=(4, 0))
+
+    def _change_web_password(self, parent=None):
+        """Диалог смены логина и пароля веб-сервера."""
+        C = COLORS
+        win = tk.Toplevel(parent or self.root)
+        win.title("Сменить пароль веб-сервера")
+        win.geometry("360x280")
+        win.configure(bg=C["bg"])
+        win.transient(parent or self.root)
+        win.grab_set()
+        win.resizable(False, False)
+
+        tk.Label(win, text="🔐 Учётные данные веб-сервера",
+                 font=("Consolas", 12, "bold"),
+                 bg=C["bg"], fg=C["accent"]).pack(pady=(18, 10))
+
+        f = tk.Frame(win, bg=C["bg"])
+        f.pack(padx=24, fill="x")
+        f.columnconfigure(1, weight=1)
+
+        def lbl_entry(row, text, show=""):
+            tk.Label(f, text=text, font=("Consolas", 10),
+                     bg=C["bg"], fg=C["text_dim"], anchor="w"
+                     ).grid(row=row, column=0, sticky="w", pady=6)
+            var = tk.StringVar()
+            e = tk.Entry(f, textvariable=var, show=show,
+                         font=("Consolas", 10), bg=C["bg3"], fg=C["text"],
+                         relief="flat", highlightthickness=1,
+                         highlightbackground=C["border"],
+                         highlightcolor=C["accent"])
+            e.grid(row=row, column=1, sticky="ew", pady=6, padx=(8, 0))
+            return var
+
+        # Текущие данные
+        srv = web_server._server_instance
+        cur_user = list(srv.credentials.keys())[0] if srv else "admin"
+
+        user_var = lbl_entry(0, "Логин:")
+        user_var.set(cur_user)
+        pass_var  = lbl_entry(1, "Новый пароль:", show="•")
+        pass2_var = lbl_entry(2, "Повторить:", show="•")
+
+        err_lbl = tk.Label(win, text="", font=("Consolas", 9),
+                           bg=C["bg"], fg=C["danger"])
+        err_lbl.pack()
+
+        def save():
+            username = user_var.get().strip()
+            pw1 = pass_var.get()
+            pw2 = pass2_var.get()
+            if not username:
+                err_lbl.config(text="Введите логин")
+                return
+            if len(pw1) < 4:
+                err_lbl.config(text="Пароль должен быть не менее 4 символов")
+                return
+            if pw1 != pw2:
+                err_lbl.config(text="Пароли не совпадают")
+                return
+            # Применяем к серверу
+            srv = web_server._server_instance
+            if srv:
+                srv.set_credentials(username, pw1)
+                # Сбрасываем все сессии — всем нужно перелогиниться
+                web_server._sessions.clear()
+            self._set_status(f"Пароль веб-сервера изменён для пользователя '{username}'")
+            win.destroy()
+
+        bf = tk.Frame(win, bg=C["bg"])
+        bf.pack(pady=10)
+        tk.Button(bf, text="Отмена", command=win.destroy,
+                  bg=C["bg3"], fg=C["text_dim"],
+                  relief="flat", bd=0, font=("Consolas", 10),
+                  padx=12, pady=5, cursor="hand2").pack(side="left", padx=6)
+        tk.Button(bf, text="💾 Сохранить", command=save,
+                  bg=C["accent2"], fg="white",
+                  relief="flat", bd=0, font=("Consolas", 10, "bold"),
+                  padx=14, pady=5, cursor="hand2").pack(side="left", padx=6)
 
     def _open_telegram_settings(self):
         C = COLORS
