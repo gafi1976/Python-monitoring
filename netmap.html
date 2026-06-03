@@ -209,12 +209,44 @@ function draw() {
     });
     if (!ll.length) return;
     var lines = ll.map(function(l){
-      // Убираем суффикс " [instance]" — ленивый квантор чтобы не съесть лишнее
-      var sh = l.label.replace(/ \[.*?\]$/, '');
-      var val = (l.value != null)
-        ? String(l.value) + (l.unit ? ' ' + l.unit : '')
-        : '...';
-      return sh + ': ' + val;
+      var sh  = l.label.replace(/ \[.*?\]$/, '');
+      var lo  = sh.toLowerCase();
+      var raw = l.value != null ? String(l.value) : null;
+      var unit = l.unit || '';
+
+      // Форматируем байты → KB/MB/GB
+      var val;
+      if (raw === null) {
+        val = '...';
+      } else {
+        var numRaw = parseFloat(raw.replace(/[^\d.]/g, ''));
+        var isBytes = lo.indexOf('octets') !== -1 || lo.indexOf('bytes') !== -1;
+        var isBps   = lo.indexOf('speed')  !== -1;
+        if (isBytes && !isNaN(numRaw)) {
+          if      (numRaw >= 1073741824) val = (numRaw/1073741824).toFixed(2) + ' GB';
+          else if (numRaw >= 1048576)    val = (numRaw/1048576).toFixed(1)    + ' MB';
+          else if (numRaw >= 1024)       val = (numRaw/1024).toFixed(1)       + ' KB';
+          else                           val = numRaw.toFixed(0)              + ' B';
+        } else if (isBps && !isNaN(numRaw)) {
+          if      (numRaw >= 1000000000) val = (numRaw/1000000000).toFixed(0) + ' Gbps';
+          else if (numRaw >= 1000000)    val = (numRaw/1000000).toFixed(0)    + ' Mbps';
+          else if (numRaw >= 1000)       val = (numRaw/1000).toFixed(0)       + ' Kbps';
+          else                           val = numRaw + ' bps';
+        } else {
+          val = raw + (unit ? ' ' + unit : '');
+        }
+      }
+
+      // Иконка + цвет по типу
+      var icon, color;
+      if      (lo.indexOf('inoctets')  !== -1) { icon = '\u2193'; color = '#50fa7b'; } // ↓ зелёный
+      else if (lo.indexOf('outoctets') !== -1) { icon = '\u2191'; color = '#ffb86c'; } // ↑ оранжевый
+      else if (lo.indexOf('error')     !== -1) { icon = '\u26a0'; color = '#ff5555'; } // ⚠ красный
+      else if (lo.indexOf('status')    !== -1) { icon = '\u25cf'; color = '#8be9fd'; } // ● голубой
+      else if (lo.indexOf('speed')     !== -1) { icon = '\u26a1'; color = '#f1fa8c'; } // ⚡ жёлтый
+      else                                     { icon = ' ';      color = '#ffffff'; }
+
+      return { text: icon + ' ' + sh + ': ' + val, color: color };
     });
     drawLabelBox(mx, my, lines);
   });
@@ -284,53 +316,47 @@ function draw() {
 
 function drawLabelBox(mx, my, lines) {
   ctx.font = '11px Consolas';
-  var lh=18, px=8, py=5, mw=0;
-  lines.forEach(function(l){ var w=ctx.measureText(l).width; if(w>mw) mw=w; });
+  var lh=18, px=10, py=6, mw=0;
+  lines.forEach(function(l){
+    var w = ctx.measureText(l.text).width;
+    if (w > mw) mw = w;
+  });
   var bw=mw+px*2, bh=lines.length*lh+py*2;
   var bx=mx-bw/2, by=my-bh/2;
 
-  // Фон с тенью
-  ctx.shadowColor   = 'rgba(0,0,0,0.6)';
-  ctx.shadowBlur    = 6;
-  ctx.shadowOffsetX = 2;
-  ctx.shadowOffsetY = 2;
-  ctx.fillStyle     = '#0f1a2e';
-  ctx.strokeStyle   = '#ffb86c';
-  ctx.lineWidth     = 1.5;
+  // Тень + фон
+  ctx.shadowColor='rgba(0,0,0,0.7)'; ctx.shadowBlur=8;
+  ctx.shadowOffsetX=2; ctx.shadowOffsetY=2;
+  ctx.fillStyle='#0d1525';
+  var r=5;
   ctx.beginPath();
-  // Скруглённые углы (r=4)
-  var r = 4;
-  ctx.moveTo(bx+r, by);
-  ctx.lineTo(bx+bw-r, by);   ctx.arcTo(bx+bw, by,    bx+bw, by+r,    r);
-  ctx.lineTo(bx+bw, by+bh-r); ctx.arcTo(bx+bw, by+bh, bx+bw-r, by+bh, r);
-  ctx.lineTo(bx+r, by+bh);    ctx.arcTo(bx,    by+bh, bx,    by+bh-r, r);
-  ctx.lineTo(bx, by+r);       ctx.arcTo(bx,    by,    bx+r,  by,      r);
+  ctx.moveTo(bx+r,by);
+  ctx.lineTo(bx+bw-r,by);    ctx.arcTo(bx+bw,by,    bx+bw,by+r,    r);
+  ctx.lineTo(bx+bw,by+bh-r); ctx.arcTo(bx+bw,by+bh, bx+bw-r,by+bh,r);
+  ctx.lineTo(bx+r,by+bh);    ctx.arcTo(bx,   by+bh,  bx,by+bh-r,   r);
+  ctx.lineTo(bx,by+r);       ctx.arcTo(bx,   by,     bx+r,by,       r);
   ctx.closePath();
   ctx.fill();
-  ctx.shadowColor = 'transparent';
-  ctx.shadowBlur  = 0;
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 0;
+  ctx.shadowColor='transparent'; ctx.shadowBlur=0;
+  ctx.shadowOffsetX=0; ctx.shadowOffsetY=0;
+
+  // Рамка — цвет первой строки
+  ctx.strokeStyle = lines.length ? lines[0].color : '#ffb86c';
+  ctx.lineWidth   = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(bx+r,by);
+  ctx.lineTo(bx+bw-r,by);    ctx.arcTo(bx+bw,by,    bx+bw,by+r,    r);
+  ctx.lineTo(bx+bw,by+bh-r); ctx.arcTo(bx+bw,by+bh, bx+bw-r,by+bh,r);
+  ctx.lineTo(bx+r,by+bh);    ctx.arcTo(bx,   by+bh,  bx,by+bh-r,   r);
+  ctx.lineTo(bx,by+r);       ctx.arcTo(bx,   by,     bx+r,by,       r);
+  ctx.closePath();
   ctx.stroke();
 
-  // Текст строк
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'middle';
-  lines.forEach(function(l, i) {
-    // Цвет по типу метрики
-    var lo = l.toLowerCase();
-    if (lo.indexOf('inoctets') !== -1 || lo.indexOf('rxbytes') !== -1) {
-      ctx.fillStyle = '#50fa7b';   // входящий — зелёный
-    } else if (lo.indexOf('outoctets') !== -1 || lo.indexOf('txbytes') !== -1) {
-      ctx.fillStyle = '#ffb86c';   // исходящий — оранжевый
-    } else if (lo.indexOf('error') !== -1) {
-      ctx.fillStyle = '#ff5555';   // ошибки — красный
-    } else if (lo.indexOf('status') !== -1) {
-      ctx.fillStyle = '#8be9fd';   // статус — голубой
-    } else {
-      ctx.fillStyle = '#ffffff';   // остальное — белый
-    }
-    ctx.fillText(l, mx, by + py + (i + 0.5) * lh);
+  // Текст
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  lines.forEach(function(l, i){
+    ctx.fillStyle = l.color;
+    ctx.fillText(l.text, mx, by + py + (i+0.5)*lh);
   });
 }
 
