@@ -232,6 +232,7 @@ class NetworkMapApp:
         self.monitor_thread: Optional[threading.Thread] = None
         self.result_queue = queue.Queue()
         self.conn_labels = ConnectionLabelManager()
+        self.conn_labels.start_polling()   # автономный SNMP-опрос меток на линиях
 
         # Режим соединения
         self.connect_mode = False
@@ -326,6 +327,9 @@ class NetworkMapApp:
             self.current_tab_name = tab_name
             self._refresh_tab_bar()
             self._select_tab(tab_name)
+            # Загружаем метки на линиях из файла
+            if "conn_labels" in data:
+                self.conn_labels.from_dict(data["conn_labels"])
             self._update_title()
             self._set_status(f"Открыта карта '{tab_name}' ({len(map_data.devices)} устройств)")
         except Exception as e:
@@ -440,6 +444,10 @@ class NetworkMapApp:
         self._draw_all()
         if was_monitoring:
             self._toggle_monitoring()
+        # Обновляем устройства для автономного опроса меток на линиях
+        tab = self.tabs.get(name)
+        if tab:
+            self.conn_labels.update_devices(tab.devices)
         self._update_title()
         self._set_status(f"Переключено на карту '{name}'")
 
@@ -1488,6 +1496,9 @@ class NetworkMapApp:
         finally:
             self._refresh_device_list()
             self._draw_all()
+            # Обновляем ссылку на устройства для автономного опроса меток
+            if self.current_tab:
+                self.conn_labels.update_devices(self.current_tab.devices)
             self.root.after(1000, self._process_queue)
 
     def _send_telegram_alert(self, dev_name: str, ip: str,
@@ -1579,6 +1590,7 @@ class NetworkMapApp:
 
     def on_close(self):
         self.monitoring_active = False
+        self.conn_labels.stop_polling()    # останавливаем автономный опрос
         if messagebox.askyesno("Выход", "Сохранить изменения?", parent=self.root):
             self._save_current_map()
         self.root.destroy()
