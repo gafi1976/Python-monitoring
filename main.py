@@ -1188,7 +1188,7 @@ class NetworkMapApp:
 
     def _import_scanned_devices(self, found_ips: list[str]):
         self._snapshot()
-        import uuid
+        import uuid, socket
         w = self.canvas.winfo_width()
         cols = max(1, int((w - 100) // 120))
         existing = {d.ip for d in self.devices.values()}
@@ -1197,7 +1197,12 @@ class NetworkMapApp:
             if ip in existing:
                 continue
             dev_id = str(uuid.uuid4())[:8]
-            dev = Device(dev_id=dev_id, name=f"Host-{ip.split('.')[-1]}", ip=ip,
+            # Пробуем определить имя хоста по IP
+            try:
+                hostname = socket.gethostbyaddr(ip)[0].split(".")[0]
+            except (socket.herror, socket.gaierror, OSError):
+                hostname = f"Host-{ip.split('.')[-1]}"
+            dev = Device(dev_id=dev_id, name=hostname, ip=ip,
                          x=80 + (added % cols) * 130 - self.canvas_offset[0],
                          y=100 + (added // cols) * 130 - self.canvas_offset[1])
             self.devices[dev_id] = dev
