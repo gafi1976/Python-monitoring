@@ -459,20 +459,23 @@ class LLDDialog:
         tree_frame = tk.Frame(self.win, bg=C["bg"])
         tree_frame.pack(fill="both", expand=True, padx=16, pady=4)
 
-        # Дерево в стиле Zabbix:
-        #   ▶ [объект]  — родительская строка (интерфейс / диск / процесс)
-        #     {#MACRO}  значение   — уточнение объекта
-        cols_def = ("key", "value", "note")
+        # Столбцы: key, value, note, dev (оборудование), line (линия)
+        cols_def = ("key", "value", "note", "dev", "line")
         self._tree = ttk.Treeview(tree_frame, columns=cols_def, show="tree headings",
                                    selectmode="extended")
-        self._tree.heading("#0",     text="")
-        self._tree.heading("key",    text="Макрос / Метрика")
-        self._tree.heading("value",  text="Значение")
-        self._tree.heading("note",   text="Описание")
+        self._tree.heading("#0",    text="")
+        self._tree.heading("key",   text="Макрос / Метрика")
+        self._tree.heading("value", text="OID / Значение")
+        self._tree.heading("note",  text="Ед.")
+        self._tree.heading("dev",   text="🖥 Оборуд.")
+        self._tree.heading("line",  text="🔗 Линия")
+
         self._tree.column("#0",    width=22,  stretch=False)
-        self._tree.column("key",   width=220)
-        self._tree.column("value", width=220)
-        self._tree.column("note",  width=220)
+        self._tree.column("key",   width=210, stretch=True)
+        self._tree.column("value", width=190, stretch=True)
+        self._tree.column("note",  width=55,  stretch=False)
+        self._tree.column("dev",   width=80,  stretch=False, anchor="center")
+        self._tree.column("line",  width=80,  stretch=False, anchor="center")
 
         sb_y = tk.Scrollbar(tree_frame, orient="vertical",
                             command=self._tree.yview, bg=C["bg3"])
@@ -497,13 +500,19 @@ class LLDDialog:
                         font=("Consolas", 9))
         style.map("Treeview", background=[("selected", C["selection"])])
 
-        # Цветовые теги: родитель (объект), макросы, метрики
+        # Цветовые теги
         self._tree.tag_configure("parent", font=("Consolas", 9, "bold"),
                                   foreground=C.get("accent", "#ffb86c"))
         self._tree.tag_configure("macro",  font=("Consolas", 9),
                                   foreground=C.get("text_dim", "#888888"))
         self._tree.tag_configure("metric", font=("Consolas", 9),
                                   foreground=C.get("online", "#50fa7b"))
+
+        # Клик по столбцам dev/line — переключает чекбокс
+        self._tree.bind("<Button-1>", self._on_tree_click)
+
+        # Хранилище состояния чекбоксов: iid → {"dev": bool, "line": bool}
+        self._check_state: dict[str, dict] = {}
 
         # Counter label
         self._count_lbl = tk.Label(self.win,
@@ -537,6 +546,34 @@ class LLDDialog:
         )
         self._stop_btn.pack(side="left", padx=4)
 
+        # Быстрые переключатели чекбоксов
+        chk_frame = tk.Frame(btn_row, bg=C["bg"])
+        chk_frame.pack(side="left", padx=12)
+        tk.Label(chk_frame, text="Выбрать все:",
+                 font=("Consolas", 9), bg=C["bg"], fg=C["text_dim"]
+                 ).pack(side="left", padx=(0,4))
+        tk.Button(chk_frame, text="🖥 Оборуд.",
+                  command=lambda: self._toggle_all_checks("dev", True),
+                  bg=C["bg3"], fg=C["accent2"],
+                  font=("Consolas", 9), relief="flat", bd=0,
+                  padx=8, pady=4, cursor="hand2"
+                  ).pack(side="left", padx=2)
+        tk.Button(chk_frame, text="🔗 Линии",
+                  command=lambda: self._toggle_all_checks("line", True),
+                  bg=C["bg3"], fg=C["accent"],
+                  font=("Consolas", 9), relief="flat", bd=0,
+                  padx=8, pady=4, cursor="hand2"
+                  ).pack(side="left", padx=2)
+        tk.Button(chk_frame, text="✕ Сброс",
+                  command=lambda: [
+                      self._toggle_all_checks("dev", False),
+                      self._toggle_all_checks("line", False)
+                  ],
+                  bg=C["bg3"], fg=C["text_dim"],
+                  font=("Consolas", 9), relief="flat", bd=0,
+                  padx=8, pady=4, cursor="hand2"
+                  ).pack(side="left", padx=2)
+
         tk.Button(
             btn_row, text="✓ Применить выбранные",
             command=self._apply_selected,
@@ -554,6 +591,50 @@ class LLDDialog:
             font=("Consolas", 10),
             relief="flat", bd=0, padx=14, pady=7, cursor="hand2",
         ).pack(side="right", padx=4)
+
+    # ── Переключение чекбоксов dev/line ──────────────────────────────────────
+
+    def _on_tree_click(self, event):
+        """Переключает чекбокс в столбце dev или line при клике."""
+        region = self._tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+        col  = self._tree.identify_column(event.x)  # "#4" или "#5"
+        iid  = self._tree.identify_row(event.y)
+        if not iid:
+            return
+        tags = self._tree.item(iid, "tags")
+        if "metric" not in tags:
+            return
+
+        if col == "#5":    # dev — 5-й столбец (0-based: #0,key,value,note,dev,line → #5=dev, #6=line)
+            field = "dev"
+        elif col == "#6":  # line
+            field = "line"
+        else:
+            return
+
+        state = self._check_state.get(iid, {"dev": False, "line": False})
+        state[field] = not state[field]
+        self._check_state[iid] = state
+
+        # Обновляем отображение
+        vals = list(self._tree.item(iid, "values"))
+        # vals: [key, value, note, dev_cb, line_cb]
+        dev_sym  = "✅" if state["dev"]  else "☐"
+        line_sym = "✅" if state["line"] else "☐"
+        vals[3] = dev_sym
+        vals[4] = line_sym
+        self._tree.item(iid, values=vals)
+
+    def _toggle_all_checks(self, field: str, value: bool):
+        """Устанавливает все чекбоксы field в value (для кнопок «Все»)."""
+        for iid, state in self._check_state.items():
+            state[field] = value
+            vals = list(self._tree.item(iid, "values"))
+            vals[3] = "✅" if state["dev"]  else "☐"
+            vals[4] = "✅" if state["line"] else "☐"
+            self._tree.item(iid, values=vals)
 
     # ── Discovery control ─────────────────────────────────────────────────────
 
@@ -666,16 +747,20 @@ class LLDDialog:
                             raw_label = e["label"]
                             bracket = raw_label.find(" [")
                             metric_name = raw_label[:bracket] if bracket != -1 else raw_label
-                            self._tree.insert(
+                            iid = self._tree.insert(
                                 seen_idx[idx], "end",
                                 text="",
                                 values=(
                                     f"  📊 {metric_name}",
                                     e["oid"],
                                     e["unit"],
+                                    "☐",   # dev checkbox
+                                    "☐",   # line checkbox
                                 ),
                                 tags=(rule_key, "metric"),
                             )
+                            # Инициализируем состояние чекбоксов
+                            self._check_state[iid] = {"dev": False, "line": False}
 
                         total = sum(len(v) for v in self._results.values())
                         self._count_lbl.config(text=f"Обнаружено: {total} элементов")
@@ -717,45 +802,136 @@ class LLDDialog:
             elif "metric" in tags:
                 expanded_iids.add(iid)
 
-        # Собираем OID из metric-строк (values[1] = oid)
-        selected_oids: set[str] = set()
+        # Собираем OID и флаги из metric-строк
+        # values: [key, oid, unit, dev_cb, line_cb]
+        selected_oids: dict[str, dict] = {}   # oid → {show_dev, show_line}
         for iid in expanded_iids:
             vals = self._tree.item(iid, "values")
-            if vals and len(vals) > 1:
+            if vals and len(vals) >= 2:
                 oid_candidate = str(vals[1]).strip()
                 if oid_candidate.startswith("1."):
-                    selected_oids.add(oid_candidate)
+                    state = self._check_state.get(iid, {"dev": False, "line": False})
+                    selected_oids[oid_candidate] = state
 
-        replace = self._replace_var.get()
-        added_total = 0
+        replace    = self._replace_var.get()
+        added_dev  = 0
+        added_line = 0
 
         for rule_key, entries in self._results.items():
             filtered = [e for e in entries if e["oid"] in selected_oids]
-            if replace and filtered:
+            if not filtered:
+                continue
+            if replace:
                 self.device.snmp_oids = [
                     o for o in self.device.snmp_oids
                     if o.get("_lld_rule") != rule_key
                 ]
-            added = LLDEngine.merge_into_device(self.device, filtered, rule_key, replace=False)
-            added_total += added
+            for entry in filtered:
+                state = selected_oids[entry["oid"]]
+                entry_copy = dict(entry)
+                entry_copy["show_on_device"] = state["dev"]
+                entry_copy["show_on_line"]   = state["line"]
+                added_dev  += LLDEngine.merge_into_device(
+                    self.device, [entry_copy], rule_key, replace=False)
+            # Добавляем метку на линию если выбрано
+            self._apply_line_labels(filtered, selected_oids)
 
-        messagebox.showinfo("LLD", f"Добавлено {added_total} OID в устройство «{self.device.name}».",
-                            parent=self.win)
+        msg = f"Добавлено в оборудование: {added_dev} OID"
+        messagebox.showinfo("LLD", msg, parent=self.win)
         self.win.destroy()
 
     def _apply_all(self):
-        """Применяет все обнаруженные элементы."""
-        replace = self._replace_var.get()
-        added_total = 0
-        for rule_key, entries in self._results.items():
-            added = LLDEngine.merge_into_device(
-                self.device, entries, rule_key, replace=replace
-            )
-            added_total += added
+        """Применяет все обнаруженные элементы с учётом чекбоксов."""
+        replace    = self._replace_var.get()
+        added_dev  = 0
 
-        messagebox.showinfo("LLD", f"Добавлено {added_total} OID в устройство «{self.device.name}».",
+        # Собираем состояние всех metric iid
+        all_states: dict[str, dict] = {}  # oid → state
+        for iid, state in self._check_state.items():
+            vals = self._tree.item(iid, "values")
+            if vals and len(vals) >= 2:
+                oid = str(vals[1]).strip()
+                if oid.startswith("1."):
+                    all_states[oid] = state
+
+        for rule_key, entries in self._results.items():
+            for entry in entries:
+                state = all_states.get(entry["oid"], {"dev": False, "line": False})
+                entry_copy = dict(entry)
+                entry_copy["show_on_device"] = state["dev"]
+                entry_copy["show_on_line"]   = state["line"]
+                added_dev += LLDEngine.merge_into_device(
+                    self.device, [entry_copy], rule_key, replace=replace)
+            self._apply_line_labels(entries, all_states)
+
+        messagebox.showinfo("LLD",
+                            f"Добавлено в оборудование: {added_dev} OID",
                             parent=self.win)
         self.win.destroy()
+
+    def _apply_line_labels(self, entries: list[dict], states: dict):
+        """
+        Добавляет метки на линию соединения для записей с show_on_line=True.
+        Использует ConnectionLabelManager из main через импорт.
+        Ищет все соединения устройства в текущей вкладке.
+        """
+        line_entries = [e for e in entries
+                        if states.get(e["oid"], {}).get("line", False)]
+        if not line_entries:
+            return
+        try:
+            # Получаем conn_labels и устройства из основного приложения
+            import main as _main
+            app = None
+            # Ищем экземпляр NetworkMapApp через Tk
+            import tkinter as _tk
+            for widget in _tk.Misc._default_root.winfo_children() if _tk.Misc._default_root else []:
+                pass
+            # Более надёжный способ — через глобальный реестр
+            for obj in _main.__dict__.values():
+                if isinstance(obj, _main.NetworkMapApp):
+                    app = obj
+                    break
+            if app is None:
+                # Пробуем через список всех Toplevel
+                import gc
+                for obj in gc.get_objects():
+                    if type(obj).__name__ == "NetworkMapApp":
+                        app = obj
+                        break
+            if app is None:
+                return
+
+            tab = app.current_tab
+            if not tab:
+                return
+            dev_id = self.device.dev_id
+
+            # Находим все соединения этого устройства
+            for (id1, id2) in tab.connections:
+                if id1 != dev_id and id2 != dev_id:
+                    continue
+                # Для каждой line_entry добавляем слот в conn_labels
+                existing = app.conn_labels.get(id1, id2)
+                existing_oids = {s.get("oid") for s in existing}
+                new_slots = list(existing)
+                for entry in line_entries:
+                    if entry["oid"] in existing_oids:
+                        continue
+                    new_slots.append({
+                        "source_dev": dev_id,
+                        "oid_label":  entry["label"],
+                        "oid":        entry["oid"],
+                        "unit":       entry.get("unit", ""),
+                        "factor":     entry.get("factor", 1.0),
+                        "interval":   30,
+                        "_last_val":  None,
+                        "_last_ts":   0.0,
+                        "_error":     None,
+                    })
+                app.conn_labels.set(id1, id2, new_slots)
+        except Exception as e:
+            print(f"[LLD] Ошибка добавления меток на линию: {e}")
 
     def _on_close(self):
         self._running = False
