@@ -24,6 +24,7 @@ from collections import deque
 from tkinter import filedialog
 from snmp_lld import LLDDialog
 from connection_label import ConnectionLabelManager, ConnectionLabelDialog
+import web_server
     
 
 # ── pysnmp 7.x asyncio API ───────────────────────────────────────────────────
@@ -550,6 +551,15 @@ class NetworkMapApp:
                   activebackground=C["border"],
                   relief="flat", bd=0, font=("Consolas", 10),
                   padx=12, pady=6, cursor="hand2").pack(side="left", padx=4, pady=8)
+
+        # Кнопка Веб-сервер
+        self.btn_web = tk.Button(tb, text="🌐 Веб",
+                  command=self._toggle_web_server,
+                  bg=C["bg3"], fg="#c792ea",
+                  activebackground=C["border"],
+                  relief="flat", bd=0, font=("Consolas", 10),
+                  padx=12, pady=6, cursor="hand2")
+        self.btn_web.pack(side="left", padx=4, pady=8)
 
         # Кнопка отчёта
         tk.Button(tb, text="📊 Отчёт",
@@ -1100,6 +1110,93 @@ class NetworkMapApp:
     #  Telegram настройки
     # ──────────────────────────────────────────────────────────────────────────
 
+    def _toggle_web_server(self):
+        C = COLORS
+        srv = web_server._server_instance
+        if srv and srv.running:
+            # Остановить
+            web_server.stop_server()
+            self.btn_web.config(bg=C["bg3"], fg="#c792ea", text="🌐 Веб")
+            self._set_status("Веб-сервер остановлен")
+        else:
+            # Запустить
+            if not web_server.FLASK_OK:
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Flask не установлен",
+                    "Установите Flask командой:\n\n  pip install flask\n\nи перезапустите программу.",
+                    parent=self.root
+                )
+                return
+            s = web_server.get_or_create(self, host="0.0.0.0", port=5050)
+            ok, url = s.start() if not s.running else (True, f"http://localhost:5050")
+            if ok:
+                self.btn_web.config(bg="#c792ea", fg=C["bg"], text="🌐 Стоп")
+                self._set_status(f"Веб-сервер запущен → {url}")
+                # Показать диалог с адресом
+                self._show_web_dialog(url)
+            else:
+                from tkinter import messagebox
+                messagebox.showerror("Ошибка", url, parent=self.root)
+
+    def _show_web_dialog(self, url: str):
+        """Диалог с адресом веб-сервера и QR-кодом."""
+        C = COLORS
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Веб-сервер запущен")
+        dlg.geometry("420x220")
+        dlg.configure(bg=C["bg"])
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+
+        tk.Label(dlg, text="🌐 Веб-сервер запущен",
+                 font=("Consolas", 13, "bold"),
+                 bg=C["bg"], fg=C["accent"]).pack(pady=(18, 6))
+
+        tk.Label(dlg,
+                 text="Откройте в браузере на любом компьютере в сети:",
+                 font=("Consolas", 9), bg=C["bg"], fg=C["text_dim"]).pack()
+
+        # Показываем реальный IP
+        import socket
+        try:
+            local_ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            local_ip = "localhost"
+        full_url = f"http://{local_ip}:5050"
+
+        url_var = tk.StringVar(value=full_url)
+        url_entry = tk.Entry(dlg, textvariable=url_var,
+                             font=("Consolas", 12, "bold"),
+                             bg=C["bg3"], fg=C["accent"],
+                             relief="flat", justify="center",
+                             highlightthickness=1,
+                             highlightbackground=C["border"],
+                             state="readonly")
+        url_entry.pack(fill="x", padx=24, pady=10)
+
+        def copy_url():
+            dlg.clipboard_clear()
+            dlg.clipboard_append(full_url)
+            copy_btn.config(text="✓ Скопировано!")
+            dlg.after(2000, lambda: copy_btn.config(text="📋 Копировать"))
+
+        bf = tk.Frame(dlg, bg=C["bg"])
+        bf.pack(pady=4)
+        copy_btn = tk.Button(bf, text="📋 Копировать", command=copy_url,
+                             bg=C["bg3"], fg=C["text"],
+                             relief="flat", bd=0, font=("Consolas", 10),
+                             padx=12, pady=5, cursor="hand2")
+        copy_btn.pack(side="left", padx=6)
+        tk.Button(bf, text="Закрыть", command=dlg.destroy,
+                  bg=C["bg3"], fg=C["text_dim"],
+                  relief="flat", bd=0, font=("Consolas", 10),
+                  padx=12, pady=5, cursor="hand2").pack(side="left", padx=6)
+
+        tk.Label(dlg,
+                 text="Карта обновляется автоматически каждые 5 секунд",
+                 font=("Consolas", 8), bg=C["bg"], fg=C["text_dim"]).pack(pady=(4, 0))
+
     def _open_telegram_settings(self):
         C = COLORS
         dlg = tk.Toplevel(self.root)
@@ -1590,7 +1687,8 @@ class NetworkMapApp:
 
     def on_close(self):
         self.monitoring_active = False
-        self.conn_labels.stop_polling()    # останавливаем автономный опрос
+        self.conn_labels.stop_polling()
+        web_server.stop_server()   # останавливаем Flask если запущен
         if messagebox.askyesno("Выход", "Сохранить изменения?", parent=self.root):
             self._save_current_map()
         self.root.destroy()
