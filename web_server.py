@@ -128,22 +128,27 @@ class NetMapWebServer:
         if not tab:
             return {"devices": [], "connections": [], "labels": []}
 
+        # canvas_offset из Tkinter — нужно вычесть чтобы получить «мировые» координаты
+        cox = tab.canvas_offset[0] if tab.canvas_offset else 0
+        coy = tab.canvas_offset[1] if tab.canvas_offset else 0
+
         devices = []
         for dev_id, dev in tab.devices.items():
             snmp = getattr(dev, "snmp_last_info", None) or {}
             devices.append({
-                "id":          dev_id,
-                "name":        dev.name,
-                "ip":          dev.ip,
-                "dtype":       dev.dtype,
-                "x":           dev.x,
-                "y":           dev.y,
-                "status":      dev.status.value,
-                "latency":     dev.latency,
-                "last_checked":dev.last_checked,
-                "description": dev.description,
-                "location":    dev.location,
-                "snmp_info":   snmp,
+                "id":           dev_id,
+                "name":         dev.name,
+                "ip":           dev.ip,
+                "dtype":        dev.dtype,
+                # Вычитаем offset — возвращаем реальные координаты на карте
+                "x":            dev.x + cox,
+                "y":            dev.y + coy,
+                "status":       dev.status.value,
+                "latency":      dev.latency,
+                "last_checked": dev.last_checked,
+                "description":  dev.description,
+                "location":     dev.location,
+                "snmp_info":    snmp,
             })
 
         connections = [
@@ -386,7 +391,39 @@ async function loadData(){
     showDetail(sel||null);draw();
   }catch(e){console.error(e);}
 }
-resize();loadData();setInterval(loadData,5000);
+function centerMap(){
+  if(!mapData.devices.length) return;
+  const xs=mapData.devices.map(d=>d.x);
+  const ys=mapData.devices.map(d=>d.y);
+  const minX=Math.min(...xs), maxX=Math.max(...xs);
+  const minY=Math.min(...ys), maxY=Math.max(...ys);
+  const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+  ox = canvas.width/2  - cx;
+  oy = canvas.height/2 - cy;
+}
+async function loadData(){
+  try{
+    const[mr,sr]=await Promise.all([fetch('/api/map'),fetch('/api/stats')]);
+    const newData=await mr.json(); const s=await sr.json();
+    const firstLoad=(mapData.devices.length===0 && newData.devices.length>0);
+    mapData=newData;
+    if(firstLoad) centerMap();
+    document.getElementById('s-on').textContent=s.online||0;
+    document.getElementById('s-off').textContent=s.offline||0;
+    document.getElementById('s-unk').textContent=(s.unknown||0)+(s.checking||0);
+    document.getElementById('updated').textContent='updated: '+(s.updated||'');
+    renderList();
+    const sel=mapData.devices.find(d=>d.id===selId);
+    showDetail(sel||null);
+    draw();
+  } catch(e){ console.error('loadData error:',e); }
+}
+// Ждём полной загрузки layout перед resize — иначе canvas.width = 0
+window.addEventListener('load', function(){
+  resize();
+  loadData();
+  setInterval(loadData, 5000);
+});
 """
         html = (
             "<!DOCTYPE html><html lang='ru'><head>"
