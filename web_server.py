@@ -92,21 +92,54 @@ class NetMapWebServer:
                 )
             return Response(html, mimetype="text/html; charset=utf-8")
 
+        @flask_app.route("/api/tabs")
+        def api_tabs():
+            return jsonify(srv._tabs_data())
+
         @flask_app.route("/api/map")
         def api_map():
-            return jsonify(srv._map_data())
+            return jsonify(srv._map_data(None))
+
+        @flask_app.route("/api/map/<tab_name>")
+        def api_map_tab(tab_name):
+            return jsonify(srv._map_data(tab_name))
 
         @flask_app.route("/api/stats")
         def api_stats():
-            return jsonify(srv._stats())
+            return jsonify(srv._stats(None))
+
+        @flask_app.route("/api/stats/<tab_name>")
+        def api_stats_tab(tab_name):
+            return jsonify(srv._stats(tab_name))
 
         return flask_app
 
     # ── Data helpers ──────────────────────────────────────────────────────────
-    def _map_data(self):
-        tab = self.app.current_tab
+    def _tabs_data(self):
+        """Список всех карт с суммарной статистикой."""
+        from device import DeviceStatus
+        result = []
+        for name, tab in self.app.tabs.items():
+            devs = list(tab.devices.values())
+            result.append({
+                "name":    name,
+                "active":  (name == self.app.current_tab_name),
+                "total":   len(devs),
+                "online":  sum(1 for d in devs if d.status == DeviceStatus.ONLINE),
+                "offline": sum(1 for d in devs if d.status == DeviceStatus.OFFLINE),
+            })
+        return result
+
+    def _get_tab(self, tab_name):
+        """Возвращает нужную вкладку или текущую если tab_name=None."""
+        if tab_name and tab_name in self.app.tabs:
+            return self.app.tabs[tab_name]
+        return self.app.current_tab
+
+    def _map_data(self, tab_name):
+        tab = self._get_tab(tab_name)
         if not tab:
-            return {"devices": [], "connections": [], "labels": []}
+            return {"devices": [], "connections": [], "labels": [], "tab": ""}
 
         devices = []
         for dev_id, dev in tab.devices.items():
@@ -130,23 +163,28 @@ class NetMapWebServer:
         for (id1, id2), slots in self.app.conn_labels._labels.items():
             for s in slots:
                 labels.append({
-                    "from":  id1,
-                    "to":    id2,
+                    "from":  id1, "to": id2,
                     "label": s.get("oid_label", ""),
                     "value": s.get("_last_val"),
                     "unit":  s.get("unit", ""),
                 })
 
-        return {"devices": devices, "connections": connections, "labels": labels}
+        return {
+            "tab":         tab.name,
+            "devices":     devices,
+            "connections": connections,
+            "labels":      labels,
+        }
 
-    def _stats(self):
-        tab = self.app.current_tab
+    def _stats(self, tab_name):
+        tab = self._get_tab(tab_name)
         if not tab:
             return {"total": 0, "online": 0, "offline": 0,
                     "unknown": 0, "updated": ""}
         from device import DeviceStatus
         devs = list(tab.devices.values())
         return {
+            "tab":     tab.name,
             "total":   len(devs),
             "online":  sum(1 for d in devs if d.status == DeviceStatus.ONLINE),
             "offline": sum(1 for d in devs if d.status == DeviceStatus.OFFLINE),

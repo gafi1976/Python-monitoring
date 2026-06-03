@@ -8,35 +8,65 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:hidden; }
 
+/* ── Toolbar ── */
 #bar {
   position:fixed; top:0; left:0; right:0; height:50px;
   background:#23233a; border-bottom:1px solid #444466;
   display:flex; align-items:center; padding:0 14px; gap:10px; z-index:10;
 }
-#bar h1 { font-size:14px; color:#ffb86c; margin-right:6px; }
+#bar h1 { font-size:14px; color:#ffb86c; margin-right:4px; white-space:nowrap; }
 .badge {
   background:#2d2d44; border:1px solid #444466; border-radius:5px;
-  padding:3px 10px; font-size:12px; display:flex; align-items:center; gap:5px;
+  padding:3px 10px; font-size:12px; display:flex; align-items:center; gap:4px;
+  white-space:nowrap;
 }
-#upd { margin-left:auto; font-size:11px; color:#666; }
-#btn-refresh {
+#upd { margin-left:auto; font-size:11px; color:#666; white-space:nowrap; }
+.tbtn {
   background:#2d2d44; border:1px solid #444466; color:#ffb86c;
   padding:5px 12px; border-radius:5px; cursor:pointer;
-  font-size:12px; font-family:inherit;
+  font-size:12px; font-family:inherit; white-space:nowrap;
 }
-#btn-refresh:hover { background:#444466; }
+.tbtn:hover { background:#444466; }
 
-#wrap { position:fixed; top:50px; left:0; right:300px; bottom:0; overflow:hidden; }
-#c    { display:block; cursor:grab; }
+/* ── Tab bar ── */
+#tabbar {
+  position:fixed; top:50px; left:0; right:0; height:32px;
+  background:#1e1e35; border-bottom:1px solid #444466;
+  display:flex; align-items:stretch; overflow-x:auto; z-index:9;
+  scrollbar-width:none;
+}
+#tabbar::-webkit-scrollbar { display:none; }
+.tab {
+  padding:0 16px; font-size:12px; cursor:pointer;
+  display:flex; align-items:center; gap:6px;
+  border-right:1px solid #333355; white-space:nowrap;
+  color:#b0b0d0; transition:background 0.15s;
+  position:relative;
+}
+.tab:hover { background:#2d2d44; color:#fff; }
+.tab.active {
+  background:#2d2d44; color:#ffb86c;
+  border-bottom:2px solid #ffb86c;
+}
+.tab-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.tab-count { font-size:10px; color:#666; }
 
+/* ── Canvas area ── */
+#wrap {
+  position:fixed; top:82px; left:0; right:300px; bottom:0; overflow:hidden;
+}
+#c { display:block; cursor:grab; }
+
+/* ── Side panel ── */
 #side {
-  position:fixed; top:50px; right:0; width:300px; bottom:0;
+  position:fixed; top:82px; right:0; width:300px; bottom:0;
   background:#23233a; border-left:1px solid #444466;
   display:flex; flex-direction:column;
 }
 #side-hdr {
-  padding:10px 12px; font-size:11px; color:#b0b0d0;
+  padding:8px 12px; font-size:11px; color:#b0b0d0;
   background:#2d2d44; border-bottom:1px solid #444466;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 #list { flex:1; overflow-y:auto; }
 .di { padding:7px 12px; cursor:pointer; border-bottom:1px solid #2d2d44; }
@@ -57,31 +87,34 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
 .dk { color:#888; }
 .dv { color:#fff; text-align:right; max-width:160px; word-break:break-all; }
 
+/* ── Tooltip ── */
 #tip {
   position:fixed; pointer-events:none; display:none;
   background:#1e2233; border:1px solid #ffb86c; border-radius:5px;
   padding:7px 11px; font-size:12px; z-index:20;
   max-width:240px; line-height:1.6;
 }
-.on  { color:#50fa7b; }
-.off { color:#ff5555; }
-.unk { color:#8be9fd; }
-.chk { color:#f1fa8c; }
 </style>
 </head>
 <body>
 
+<!-- Toolbar -->
 <div id="bar">
   <h1>&#9783; NetMap</h1>
-  <div class="badge"><span class="on">&#9679;</span>&nbsp;Online:&nbsp;<b id="s-on">0</b></div>
-  <div class="badge"><span class="off">&#9679;</span>&nbsp;Offline:&nbsp;<b id="s-off">0</b></div>
-  <div class="badge"><span class="unk">&#9679;</span>&nbsp;Unknown:&nbsp;<b id="s-unk">0</b></div>
-  <button id="btn-refresh">&#8635; Refresh</button>
+  <div class="badge"><span style="color:#50fa7b">&#9679;</span>&nbsp;Online:&nbsp;<b id="s-on">0</b></div>
+  <div class="badge"><span style="color:#ff5555">&#9679;</span>&nbsp;Offline:&nbsp;<b id="s-off">0</b></div>
+  <div class="badge"><span style="color:#8be9fd">&#9679;</span>&nbsp;Unknown:&nbsp;<b id="s-unk">0</b></div>
+  <button class="tbtn" id="btn-refresh">&#8635; Refresh</button>
   <span id="upd"></span>
 </div>
 
+<!-- Tab bar -->
+<div id="tabbar"></div>
+
+<!-- Canvas -->
 <div id="wrap"><canvas id="c"></canvas></div>
 
+<!-- Side panel -->
 <div id="side">
   <div id="side-hdr">DEVICES</div>
   <div id="list"></div>
@@ -91,26 +124,28 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
 <div id="tip"></div>
 
 <script>
-// ── Цвета статусов ──────────────────────────────────────────────────────────
+// ── Константы ────────────────────────────────────────────────────────────────
 var STATUS_COLOR = {
-  'Online':       '#50fa7b',
-  'Offline':      '#ff5555',
-  'Неизвестно':   '#8be9fd',
-  'Проверка...':  '#f1fa8c'
+  'Online':      '#50fa7b',
+  'Offline':     '#ff5555',
+  '\u041d\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e': '#8be9fd',
+  '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430...':           '#f1fa8c'
 };
 var DTYPE_LABEL = {
   router:'RTR', switch:'SW', server:'SRV', pc:'PC',
   printer:'PRN', camera:'CAM', phone:'TEL', ups:'UPS', other:'DEV'
 };
 
-// ── Состояние ───────────────────────────────────────────────────────────────
-var mapData  = { devices:[], connections:[], labels:[] };
-var selId    = null;
+// ── Состояние ────────────────────────────────────────────────────────────────
+var mapData     = { devices:[], connections:[], labels:[], tab:'' };
+var allTabs     = [];          // список карт от /api/tabs
+var currentTab  = '';          // имя выбранной карты в браузере
+var selId       = null;
 var ox=0, oy=0;
 var drag=false, dragX=0, dragY=0, ox0=0, oy0=0;
-var firstLoad = true;
+var prevTabName = '';          // для определения смены карты (сброс центра)
 
-// ── Canvas ──────────────────────────────────────────────────────────────────
+// ── Canvas ───────────────────────────────────────────────────────────────────
 var wrap   = document.getElementById('wrap');
 var canvas = document.getElementById('c');
 var ctx    = canvas.getContext('2d');
@@ -121,66 +156,56 @@ function resize() {
   draw();
 }
 
-// ── Центрирование карты ─────────────────────────────────────────────────────
+// ── Центрирование ────────────────────────────────────────────────────────────
 function centerMap() {
   if (!mapData.devices.length) return;
   var xs = mapData.devices.map(function(d){ return d.x; });
   var ys = mapData.devices.map(function(d){ return d.y; });
-  var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
-  var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
-  ox = canvas.width  / 2 - (minX + maxX) / 2;
-  oy = canvas.height / 2 - (minY + maxY) / 2;
+  ox = canvas.width  / 2 - (Math.min.apply(null,xs) + Math.max.apply(null,xs)) / 2;
+  oy = canvas.height / 2 - (Math.min.apply(null,ys) + Math.max.apply(null,ys)) / 2;
 }
 
-// ── Рисование ───────────────────────────────────────────────────────────────
+// ── Рисование ────────────────────────────────────────────────────────────────
 function draw() {
   var w = canvas.width, h = canvas.height;
   if (!w || !h) return;
   ctx.clearRect(0, 0, w, h);
 
   // Сетка
-  ctx.strokeStyle = '#2d2d44';
-  ctx.lineWidth   = 1;
+  ctx.strokeStyle = '#2d2d44'; ctx.lineWidth = 1;
   var step = 40;
-  for (var gx = ((ox % step) + step) % step; gx < w; gx += step) {
-    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
+  for (var gx = ((ox%step)+step)%step; gx < w; gx += step) {
+    ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,h); ctx.stroke();
   }
-  for (var gy = ((oy % step) + step) % step; gy < h; gy += step) {
-    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+  for (var gy = ((oy%step)+step)%step; gy < h; gy += step) {
+    ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(w,gy); ctx.stroke();
   }
 
-  // Индекс устройств
   var dm = {};
-  mapData.devices.forEach(function(d) { dm[d.id] = d; });
+  mapData.devices.forEach(function(d){ dm[d.id] = d; });
 
   // Соединения
   mapData.connections.forEach(function(c) {
-    var d1 = dm[c.from], d2 = dm[c.to];
-    if (!d1 || !d2) return;
+    var d1=dm[c.from], d2=dm[c.to];
+    if (!d1||!d2) return;
     var x1=d1.x+ox, y1=d1.y+oy, x2=d2.x+ox, y2=d2.y+oy;
-    var both = (d1.status === 'Online' && d2.status === 'Online');
-
+    var both = (d1.status==='Online' && d2.status==='Online');
     ctx.beginPath();
     ctx.strokeStyle = both ? '#50fa7b' : '#6272a4';
     ctx.lineWidth   = both ? 2 : 1;
-    ctx.setLineDash(both ? [] : [5, 5]);
-    ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.setLineDash(both ? [] : [5,5]);
+    ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
     ctx.setLineDash([]);
 
     // Метки на линии
-    var mx = (x1+x2)/2, my = (y1+y2)/2;
-    var ll = mapData.labels.filter(function(l) {
-      return (l.from===c.from && l.to===c.to) ||
-             (l.from===c.to   && l.to===c.from);
+    var mx=(x1+x2)/2, my=(y1+y2)/2;
+    var ll = mapData.labels.filter(function(l){
+      return (l.from===c.from&&l.to===c.to)||(l.from===c.to&&l.to===c.from);
     });
     if (ll.length) {
-      var lines = ll.map(function(l) {
-        // Убираем суффикс " [instance]" из метки
+      var lines = ll.map(function(l){
         var sh = l.label.replace(/ \[.*\]$/, '');
-        var val = (l.value != null)
-          ? l.value + (l.unit ? ' ' + l.unit : '')
-          : '...';
-        return sh + ': ' + val;
+        return sh + ': ' + (l.value!=null ? l.value+(l.unit?' '+l.unit:'') : '...');
       });
       drawLabelBox(mx, my, lines);
     }
@@ -188,289 +213,268 @@ function draw() {
 
   // Устройства
   mapData.devices.forEach(function(d) {
-    var x  = d.x + ox, y = d.y + oy, sz = 28;
-    var sc = STATUS_COLOR[d.status] || '#8be9fd';
+    var x=d.x+ox, y=d.y+oy, sz=28;
+    var sc    = STATUS_COLOR[d.status] || '#8be9fd';
     var isSel = (d.id === selId);
 
-    // Кольцо выделения
     if (isSel) {
-      ctx.beginPath(); ctx.arc(x, y, sz+7, 0, Math.PI*2);
-      ctx.strokeStyle = '#ffb86c'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x,y,sz+7,0,Math.PI*2);
+      ctx.strokeStyle='#ffb86c'; ctx.lineWidth=2; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(x,y,sz,0,Math.PI*2);
+    ctx.fillStyle='#2d2d44'; ctx.fill();
+    ctx.strokeStyle=sc; ctx.lineWidth=isSel?3:2; ctx.stroke();
+
+    ctx.font='bold 9px Consolas';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle=sc;
+    ctx.fillText(DTYPE_LABEL[d.dtype]||'DEV', x, y-3);
+
+    ctx.beginPath(); ctx.arc(x+sz-7, y-sz+5, 5, 0, Math.PI*2);
+    ctx.fillStyle=sc; ctx.fill();
+    ctx.strokeStyle='#1a1a2e'; ctx.lineWidth=1.5; ctx.stroke();
+
+    if (d.status==='Online' && d.latency!=null) {
+      var lc = d.latency<50?'#50fa7b':d.latency<150?'#f1fa8c':'#ff5555';
+      ctx.font='8px Consolas'; ctx.fillStyle=lc;
+      ctx.fillText(d.latency.toFixed(0)+'ms', x, y+14);
     }
 
-    // Круг устройства
-    ctx.beginPath(); ctx.arc(x, y, sz, 0, Math.PI*2);
-    ctx.fillStyle   = '#2d2d44'; ctx.fill();
-    ctx.strokeStyle = sc; ctx.lineWidth = isSel ? 3 : 2; ctx.stroke();
+    ctx.font='bold 10px Consolas'; ctx.fillStyle='#ffffff';
+    ctx.fillText(d.name, x, y+sz+13);
+    ctx.font='9px Consolas'; ctx.fillStyle='#b0b0d0';
+    ctx.fillText(d.ip, x, y+sz+25);
 
-    // Аббревиатура типа
-    ctx.font         = 'bold 9px Consolas';
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle    = sc;
-    ctx.fillText(DTYPE_LABEL[d.dtype] || 'DEV', x, y - 3);
-
-    // Точка-индикатор статуса
-    ctx.beginPath(); ctx.arc(x + sz - 7, y - sz + 5, 5, 0, Math.PI*2);
-    ctx.fillStyle = sc; ctx.fill();
-    ctx.strokeStyle = '#1a1a2e'; ctx.lineWidth = 1.5; ctx.stroke();
-
-    // Задержка (ping)
-    if (d.status === 'Online' && d.latency != null) {
-      var lc = d.latency < 50 ? '#50fa7b' : d.latency < 150 ? '#f1fa8c' : '#ff5555';
-      ctx.font      = '8px Consolas';
-      ctx.fillStyle = lc;
-      ctx.fillText(d.latency.toFixed(0) + 'ms', x, y + 14);
-    }
-
-    // Имя и IP под кругом
-    ctx.font      = 'bold 10px Consolas';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(d.name, x, y + sz + 13);
-    ctx.font      = '9px Consolas';
-    ctx.fillStyle = '#b0b0d0';
-    ctx.fillText(d.ip, x, y + sz + 25);
-
-    // ── SNMP-метрики под устройством ──────────────────────────────────────
+    // SNMP-метрики под устройством
     var snmp = d.snmp_info;
     if (snmp && Object.keys(snmp).length > 0) {
-      var entries = Object.keys(snmp).map(function(k) {
+      var entries = Object.keys(snmp).map(function(k){
         var v = String(snmp[k]);
-        if (v.length > 18) v = v.substring(0, 16) + '…';
-        return k + ': ' + v;
+        if (v.length > 18) v = v.substring(0,16)+'...';
+        return k+': '+v;
       });
-
-      // Ширина блока по самой длинной строке
-      ctx.font = '8px Consolas';
-      var bpad = 5, lineH = 14;
-      var maxW = 0;
-      entries.forEach(function(e) {
-        var w = ctx.measureText(e).width;
-        if (w > maxW) maxW = w;
+      ctx.font='8px Consolas';
+      var bpad=5, lineH=14, maxW=0;
+      entries.forEach(function(e){
+        var w=ctx.measureText(e).width; if(w>maxW) maxW=w;
       });
-
-      var boxW = maxW + bpad * 2;
-      var boxH = entries.length * lineH + bpad * 2 + 14; // +14 для заголовка
-      var bx   = x - boxW / 2;
-      var by   = y + sz + 34; // начало блока под IP
-
-      // Фон
-      ctx.fillStyle   = '#0d1a0d';
-      ctx.strokeStyle = '#264f78';
-      ctx.lineWidth   = 1;
-      ctx.beginPath();
-      ctx.rect(bx, by, boxW, boxH);
-      ctx.fill();
-      ctx.stroke();
-
-      // Заголовок "── SNMP ──"
-      ctx.font      = '8px Consolas';
-      ctx.fillStyle = '#264f78';
-      ctx.textAlign    = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('── SNMP ──', x, by + 7);
-
-      // Строки метрик
-      ctx.fillStyle = '#ffb454';
-      entries.forEach(function(e, i) {
-        ctx.fillText(e, x, by + 14 + bpad + i * lineH + lineH / 2);
+      var boxW=maxW+bpad*2, boxH=entries.length*lineH+bpad*2+14;
+      var bx=x-boxW/2, by=y+sz+34;
+      ctx.fillStyle='#0d1a0d'; ctx.strokeStyle='#264f78'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.rect(bx,by,boxW,boxH); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#264f78'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('-- SNMP --', x, by+7);
+      ctx.fillStyle='#ffb454';
+      entries.forEach(function(e,i){
+        ctx.fillText(e, x, by+14+bpad+i*lineH+lineH/2);
       });
     }
   });
 }
 
 function drawLabelBox(mx, my, lines) {
-  ctx.font = '9px Consolas';
+  ctx.font='9px Consolas';
   var lh=14, px=6, py=3, mw=0;
-  lines.forEach(function(l) {
-    var w = ctx.measureText(l).width;
-    if (w > mw) mw = w;
-  });
-  var bw = mw+px*2, bh = lines.length*lh+py*2;
-  var bx = mx-bw/2, by = my-bh/2;
-  ctx.fillStyle   = '#1a2233';
-  ctx.strokeStyle = '#444466';
-  ctx.lineWidth   = 1;
-  ctx.beginPath(); ctx.rect(bx, by, bw, bh); ctx.fill(); ctx.stroke();
-  ctx.fillStyle    = '#ffb86c';
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'middle';
-  lines.forEach(function(l, i) {
-    ctx.fillText(l, mx, by + py + (i + 0.5) * lh);
-  });
+  lines.forEach(function(l){ var w=ctx.measureText(l).width; if(w>mw)mw=w; });
+  var bw=mw+px*2, bh=lines.length*lh+py*2, bx=mx-bw/2, by=my-bh/2;
+  ctx.fillStyle='#1a2233'; ctx.strokeStyle='#444466'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.rect(bx,by,bw,bh); ctx.fill(); ctx.stroke();
+  ctx.fillStyle='#ffb86c'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  lines.forEach(function(l,i){ ctx.fillText(l, mx, by+py+(i+0.5)*lh); });
 }
 
-// ── Мышь ────────────────────────────────────────────────────────────────────
-canvas.addEventListener('mousedown', function(e) {
+// ── Tab bar ──────────────────────────────────────────────────────────────────
+function renderTabs() {
+  var html = '';
+  allTabs.forEach(function(t) {
+    var isActive = (t.name === currentTab);
+    // Цвет точки: зелёный если есть online, красный если есть offline, серый
+    var dotColor = t.online > 0 ? '#50fa7b' : t.offline > 0 ? '#ff5555' : '#666';
+    html += '<div class="tab' + (isActive ? ' active' : '') + '" '
+          + 'onclick="switchTab(\'' + escAttr(t.name) + '\')">'
+          + '<span class="tab-dot" style="background:' + dotColor + '"></span>'
+          + escHtml(t.name)
+          + '<span class="tab-count">' + t.total + '</span>'
+          + '</div>';
+  });
+  document.getElementById('tabbar').innerHTML = html;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return String(s).replace(/'/g,"\\'");
+}
+
+function switchTab(name) {
+  if (name === currentTab) return;
+  currentTab  = name;
+  selId       = null;
+  prevTabName = name;
+  renderTabs();
+  loadMapForTab(name);
+}
+
+// ── Mouse ────────────────────────────────────────────────────────────────────
+canvas.addEventListener('mousedown', function(e){
   drag=true; canvas.style.cursor='grabbing';
   dragX=e.clientX; dragY=e.clientY; ox0=ox; oy0=oy;
 });
-canvas.addEventListener('mousemove', function(e) {
-  if (drag) {
-    ox = ox0 + (e.clientX - dragX);
-    oy = oy0 + (e.clientY - dragY);
-    draw();
-  }
+canvas.addEventListener('mousemove', function(e){
+  if (drag){ ox=ox0+(e.clientX-dragX); oy=oy0+(e.clientY-dragY); draw(); }
   showTooltip(e);
 });
-canvas.addEventListener('mouseup', function(e) {
-  var moved = Math.abs(e.clientX-dragX) > 4 || Math.abs(e.clientY-dragY) > 4;
-  drag = false;
-  canvas.style.cursor = 'grab';
+canvas.addEventListener('mouseup', function(e){
+  var moved = Math.abs(e.clientX-dragX)>4||Math.abs(e.clientY-dragY)>4;
+  drag=false; canvas.style.cursor='grab';
   if (!moved) handleClick(e);
 });
-canvas.addEventListener('mouseleave', function() {
-  drag = false;
-  document.getElementById('tip').style.display = 'none';
+canvas.addEventListener('mouseleave', function(){
+  drag=false;
+  document.getElementById('tip').style.display='none';
 });
 
-function devAt(cx, cy) {
-  for (var i = 0; i < mapData.devices.length; i++) {
-    var d = mapData.devices[i];
-    var dx = d.x + ox - cx, dy = d.y + oy - cy;
-    if (Math.sqrt(dx*dx + dy*dy) <= 32) return d;
+function devAt(cx,cy){
+  for (var i=0;i<mapData.devices.length;i++){
+    var d=mapData.devices[i], dx=d.x+ox-cx, dy=d.y+oy-cy;
+    if (Math.sqrt(dx*dx+dy*dy)<=32) return d;
   }
   return null;
 }
 
-function showTooltip(e) {
-  var tip = document.getElementById('tip');
-  var d   = devAt(e.offsetX, e.offsetY);
-  if (d) {
-    var sc = STATUS_COLOR[d.status] || '#8be9fd';
-    var html = '<b>' + d.name + '</b><br>'
-             + d.ip + '<br>'
-             + 'Status: <span style="color:' + sc + '">' + d.status + '</span>';
-    if (d.latency != null) html += '<br>Ping: ' + d.latency.toFixed(1) + ' ms';
-    if (d.last_checked)    html += '<br>' + d.last_checked;
-    tip.innerHTML     = html;
-    tip.style.display = 'block';
-    tip.style.left    = (e.clientX + 14) + 'px';
-    tip.style.top     = (e.clientY - 10) + 'px';
-  } else {
-    tip.style.display = 'none';
-  }
+function showTooltip(e){
+  var tip=document.getElementById('tip'), d=devAt(e.offsetX,e.offsetY);
+  if (d){
+    var sc=STATUS_COLOR[d.status]||'#8be9fd';
+    var html='<b>'+escHtml(d.name)+'</b><br>'+d.ip+'<br>'
+            +'Status: <span style="color:'+sc+'">'+d.status+'</span>';
+    if (d.latency!=null) html+='<br>Ping: '+d.latency.toFixed(1)+' ms';
+    if (d.last_checked)  html+='<br>'+d.last_checked;
+    tip.innerHTML=html; tip.style.display='block';
+    tip.style.left=(e.clientX+14)+'px'; tip.style.top=(e.clientY-10)+'px';
+  } else { tip.style.display='none'; }
 }
 
-function handleClick(e) {
-  var d = devAt(e.offsetX, e.offsetY);
-  selId = d ? d.id : null;
-  draw();
-  renderList();
-  showDetail(d);
+function handleClick(e){
+  var d=devAt(e.offsetX,e.offsetY);
+  selId=d?d.id:null; draw(); renderList(); showDetail(d);
 }
 
-// ── Детали устройства ───────────────────────────────────────────────────────
-function showDetail(d) {
-  var el = document.getElementById('det');
-  if (!d) {
-    el.innerHTML = '<p style="color:#555;padding:8px">Click a device</p>';
-    return;
-  }
-  var sc  = STATUS_COLOR[d.status] || '#8be9fd';
-  var h   = '<h3>' + d.name + '</h3>';
-  var rows = [
-    ['IP',       d.ip],
-    ['Status',   '<span style="color:' + sc + '">' + d.status + '</span>'],
-    ['Type',     d.dtype],
-    ['Ping',     d.latency != null ? d.latency.toFixed(1) + ' ms' : '&mdash;'],
-    ['Checked',  d.last_checked || '&mdash;'],
-    ['Location', d.location     || '&mdash;']
+// ── Detail panel ─────────────────────────────────────────────────────────────
+function showDetail(d){
+  var el=document.getElementById('det');
+  if (!d){ el.innerHTML='<p style="color:#555;padding:8px">Click a device</p>'; return; }
+  var sc=STATUS_COLOR[d.status]||'#8be9fd';
+  var h='<h3>'+escHtml(d.name)+'</h3>';
+  var rows=[
+    ['IP',d.ip],
+    ['Status','<span style="color:'+sc+'">'+d.status+'</span>'],
+    ['Type',d.dtype],
+    ['Ping',d.latency!=null?d.latency.toFixed(1)+' ms':'&mdash;'],
+    ['Checked',d.last_checked||'&mdash;'],
+    ['Location',d.location||'&mdash;']
   ];
-  rows.forEach(function(r) {
-    h += '<div class="dr">'
-       + '<span class="dk">' + r[0] + '</span>'
-       + '<span class="dv">' + r[1] + '</span>'
-       + '</div>';
+  rows.forEach(function(r){
+    h+='<div class="dr"><span class="dk">'+r[0]+'</span>'
+      +'<span class="dv">'+r[1]+'</span></div>';
   });
-  if (d.snmp_info && Object.keys(d.snmp_info).length) {
-    h += '<div style="color:#264f78;padding:5px 0 2px;font-weight:bold">'
-       + '&#9135; SNMP &#9135;</div>';
-    Object.keys(d.snmp_info).forEach(function(k) {
-      h += '<div class="dr">'
-         + '<span class="dk">' + k + '</span>'
-         + '<span class="dv" style="color:#ffb454">' + d.snmp_info[k] + '</span>'
-         + '</div>';
+  if (d.snmp_info&&Object.keys(d.snmp_info).length){
+    h+='<div style="color:#264f78;padding:5px 0 2px;font-weight:bold">-- SNMP --</div>';
+    Object.keys(d.snmp_info).forEach(function(k){
+      h+='<div class="dr"><span class="dk">'+escHtml(k)+'</span>'
+        +'<span class="dv" style="color:#ffb454">'+escHtml(String(d.snmp_info[k]))+'</span></div>';
     });
   }
-  el.innerHTML = h;
+  el.innerHTML=h;
 }
 
-// ── Список устройств ────────────────────────────────────────────────────────
-function renderList() {
-  var html = '';
-  mapData.devices.forEach(function(d) {
-    var sc  = STATUS_COLOR[d.status] || '#8be9fd';
-    var lat = d.latency != null ? ' ' + d.latency.toFixed(0) + 'ms' : '';
-    html += '<div class="di' + (d.id === selId ? ' sel' : '') + '" '
-          + 'onclick="clickDevice(\'' + d.id + '\')">'
-          + '<div class="dn">'
-          + '<span style="color:' + sc + '">&#9679;</span> '
-          + d.name
-          + '<span style="color:' + sc + ';font-size:10px">' + lat + '</span>'
-          + '</div>'
-          + '<div class="dip">' + d.ip + ' &mdash; ' + d.dtype + '</div>'
-          + '</div>';
+// ── Device list ───────────────────────────────────────────────────────────────
+function renderList(){
+  var html='';
+  mapData.devices.forEach(function(d){
+    var sc=STATUS_COLOR[d.status]||'#8be9fd';
+    var lat=d.latency!=null?' '+d.latency.toFixed(0)+'ms':'';
+    html+='<div class="di'+(d.id===selId?' sel':'')+'" onclick="clickDevice(\''+d.id+'\')">'
+         +'<div class="dn"><span style="color:'+sc+'">&#9679;</span> '+escHtml(d.name)
+         +'<span style="color:'+sc+';font-size:10px">'+lat+'</span></div>'
+         +'<div class="dip">'+d.ip+' &mdash; '+d.dtype+'</div></div>';
   });
-  document.getElementById('list').innerHTML = html;
+  document.getElementById('list').innerHTML=html;
+  document.getElementById('side-hdr').textContent=
+    'DEVICES  —  '+(currentTab||'...')+' ('+mapData.devices.length+')';
 }
 
-function clickDevice(id) {
-  selId = id;
-  var found = null;
-  mapData.devices.forEach(function(d) { if (d.id === id) found = d; });
-  if (found) {
-    ox = canvas.width  / 2 - found.x;
-    oy = canvas.height / 2 - found.y;
-  }
-  draw();
-  renderList();
-  showDetail(found);
+function clickDevice(id){
+  selId=id;
+  var found=null;
+  mapData.devices.forEach(function(d){ if(d.id===id) found=d; });
+  if (found){ ox=canvas.width/2-found.x; oy=canvas.height/2-found.y; }
+  draw(); renderList(); showDetail(found);
 }
 
-// ── Загрузка данных ─────────────────────────────────────────────────────────
-function loadData() {
-  var p1 = fetch('/api/map').then(function(r)   { return r.json(); });
-  var p2 = fetch('/api/stats').then(function(r) { return r.json(); });
+// ── Data loading ──────────────────────────────────────────────────────────────
+function loadMapForTab(tabName) {
+  var url = tabName ? '/api/map/'+encodeURIComponent(tabName) : '/api/map';
+  var su  = tabName ? '/api/stats/'+encodeURIComponent(tabName) : '/api/stats';
 
-  Promise.all([p1, p2])
-    .then(function(results) {
-      var map = results[0], st = results[1];
+  Promise.all([
+    fetch(url).then(function(r){ return r.json(); }),
+    fetch(su).then(function(r){ return r.json(); })
+  ]).then(function(res){
+    var map=res[0], st=res[1];
+    var tabChanged = (map.tab !== prevTabName);
+    var wasEmpty   = (!mapData.devices.length && map.devices.length > 0);
+    prevTabName    = map.tab;
+    mapData        = map;
 
-      var wasEmpty = (mapData.devices.length === 0 && map.devices.length > 0);
-      mapData = map;
+    if (wasEmpty || tabChanged) centerMap();
 
-      if (wasEmpty) {
-        centerMap();     // автоцентр при первой загрузке
+    document.getElementById('s-on').textContent  = st.online  || 0;
+    document.getElementById('s-off').textContent = st.offline || 0;
+    document.getElementById('s-unk').textContent = st.unknown || 0;
+    document.getElementById('upd').textContent   = st.updated || '';
+
+    renderList();
+    var sel=null;
+    mapData.devices.forEach(function(d){ if(d.id===selId) sel=d; });
+    showDetail(sel);
+    draw();
+  }).catch(function(e){ console.error('loadMapForTab:', e); });
+}
+
+function loadTabs() {
+  fetch('/api/tabs').then(function(r){ return r.json(); })
+    .then(function(tabs){
+      allTabs = tabs;
+      // При первом запросе — выбираем активную карту
+      if (!currentTab) {
+        var active = tabs.filter(function(t){ return t.active; });
+        currentTab = active.length ? active[0].name : (tabs.length ? tabs[0].name : '');
       }
-
-      document.getElementById('s-on').textContent  = st.online  || 0;
-      document.getElementById('s-off').textContent = st.offline || 0;
-      document.getElementById('s-unk').textContent = st.unknown || 0;
-      document.getElementById('upd').textContent   = 'updated ' + (st.updated || '');
-
-      renderList();
-
-      // Обновить детали если устройство всё ещё выбрано
-      var sel = null;
-      mapData.devices.forEach(function(d) { if (d.id === selId) sel = d; });
-      showDetail(sel);
-
-      draw();
+      renderTabs();
     })
-    .catch(function(err) {
-      console.error('loadData error:', err);
-    });
+    .catch(function(e){ console.error('loadTabs:', e); });
 }
 
-// ── Старт ───────────────────────────────────────────────────────────────────
-document.getElementById('btn-refresh').addEventListener('click', loadData);
+function loadAll() {
+  loadTabs();
+  loadMapForTab(currentTab);
+}
+
+// ── Старт ────────────────────────────────────────────────────────────────────
+document.getElementById('btn-refresh').addEventListener('click', loadAll);
 window.addEventListener('resize', resize);
 
-window.addEventListener('load', function() {
-  resize();       // canvas получает правильный размер ПОСЛЕ отрисовки layout
-  loadData();     // первая загрузка данных
-  setInterval(loadData, 5000);   // автообновление каждые 5 сек
+window.addEventListener('load', function(){
+  resize();
+  loadAll();
+  setInterval(function(){
+    loadTabs();
+    loadMapForTab(currentTab);
+  }, 5000);
 });
 </script>
 </body>
