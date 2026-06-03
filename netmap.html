@@ -68,6 +68,17 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
   background:#2d2d44; border-bottom:1px solid #444466;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
+#search-wrap {
+  padding:6px 8px; background:#1e1e35;
+  border-bottom:1px solid #444466;
+}
+#search-inp {
+  width:100%; background:#2d2d44; border:1px solid #444466;
+  border-radius:5px; color:#fff; padding:5px 10px;
+  font-family:inherit; font-size:12px; outline:none;
+  transition:border 0.2s;
+}
+#search-inp:focus { border-color:#ffb86c; }
 #list { flex:1; overflow-y:auto; }
 .di { padding:7px 12px; cursor:pointer; border-bottom:1px solid #2d2d44; }
 .di:hover { background:#2d2d44; }
@@ -156,6 +167,8 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
   <div class="badge"><span style="color:#8be9fd">&#9679;</span>&nbsp;Unknown:&nbsp;<b id="s-unk">0</b></div>
   <button class="tbtn" id="btn-refresh">&#8635; Refresh</button>
   <button class="tbtn" id="btn-intervals" title="Настройка интервалов">&#9201; Интервалы</button>
+  <button class="tbtn" id="btn-png" title="Сохранить карту как PNG">&#128247; PNG</button>
+  <button class="tbtn" id="btn-logout" title="Выйти" style="margin-left:auto;color:#ff5555">&#10006; Выйти</button>
   <span id="upd"></span>
 </div>
 
@@ -168,6 +181,9 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
 <!-- Side panel -->
 <div id="side">
   <div id="side-hdr">DEVICES</div>
+  <div id="search-wrap">
+    <input id="search-inp" type="text" placeholder="&#128269; Поиск по имени / IP...">
+  </div>
   <div id="list"></div>
   <div id="det"><p style="color:#555;padding:8px">Click a device</p></div>
 </div>
@@ -215,6 +231,7 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
 
     <div class="mbtns">
       <button class="mbtn" id="btn-modal-cancel">Отмена</button>
+      <button class="mbtn" id="btn-purge" style="color:#ff5555" title="Удалить старые записи из БД">&#128465; Очистить историю</button>
       <button class="mbtn primary" id="btn-modal-ok">&#10003; Применить</button>
     </div>
   </div>
@@ -269,6 +286,15 @@ document.getElementById('btn-modal-ok').addEventListener('click', function(){
   tipHistory = {};  // сбрасываем весь кэш
   applyMapInterval();
   document.getElementById('modal-overlay').classList.remove('open');
+});
+document.getElementById('btn-purge').addEventListener('click', function() {
+  if (!confirm('Удалить записи истории старше 90 дней?\nЭто действие необратимо.')) return;
+  fetch('/api/db/purge', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days:90})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok) alert('Удалено записей: ' + d.deleted + '\nРазмер БД: ' + d.size_mb + ' МБ');
+      else      alert('Ошибка: ' + d.error);
+    });
 });
 // Закрыть по клику на оверлей
 document.getElementById('modal-overlay').addEventListener('click', function(e){
@@ -955,7 +981,241 @@ function loadAll() {
 // ── Старт ────────────────────────────────────────────────────────────────────
 document.getElementById('btn-refresh').addEventListener('click', loadAll);
 document.getElementById('btn-intervals').addEventListener('click', openIntervalsModal);
+document.getElementById('btn-logout').addEventListener('click', function(){
+  fetch('/api/logout').then(function(){ window.location.href = '/login'; });
+});
 window.addEventListener('resize', resize);
+
+// ── Zoom колесом мыши ─────────────────────────────────────────────────────────
+var scale = 1.0;
+canvas.addEventListener('wheel', function(e) {
+  e.preventDefault();
+  var factor = e.deltaY < 0 ? 1.1 : 0.91;
+  var newScale = Math.max(0.2, Math.min(5.0, scale * factor));
+  // Масштабируем относительно позиции курсора
+  var rect = canvas.getBoundingClientRect();
+  var mx   = e.clientX - rect.left;
+  var my   = e.clientY - rect.top;
+  ox = mx - (mx - ox) * (newScale / scale);
+  oy = my - (my - oy) * (newScale / scale);
+  scale = newScale;
+  // Применяем scale ко всем устройствам через transform матрицу
+  mapData.devices.forEach(function(d){
+    d._sx = d.x; d._sy = d.y;
+  });
+  drawZoomed();
+}, { passive: false });
+
+function drawZoomed() {
+  // Сохраняем оригинальные координаты и применяем масштаб через ctx.scale
+  var w = canvas.width, h = canvas.height;
+  if (!w || !h) return;
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.scale(scale, scale);
+  // Пересчитываем offset с учётом scale
+  var sOx = ox / scale, sOy = oy / scale;
+  var savedOx = ox, savedOy = oy;
+  ox = sOx; oy = sOy;
+  draw();
+  ox = savedOx; oy = savedOy;
+  ctx.restore();
+}
+
+// Перегружаем draw чтобы учитывать scale при zoom
+var _origDraw = draw;
+draw = function() {
+  if (scale !== 1.0) {
+    drawZoomed();
+  } else {
+    _origDraw();
+  }
+};
+
+// Двойной клик — сброс zoom
+canvas.addEventListener('dblclick', function(e) {
+  var d = devAt(e.offsetX, e.offsetY);
+  if (!d) {
+    // Сбросить zoom
+    scale = 1.0;
+    centerMap();
+    draw();
+  }
+});
+
+// ── Поиск устройства ─────────────────────────────────────────────────────────
+var searchQuery = '';
+document.getElementById('search-inp').addEventListener('input', function() {
+  searchQuery = this.value.toLowerCase().trim();
+  renderList();
+  // Подсвечиваем найденное устройство на карте
+  if (searchQuery) {
+    var found = mapData.devices.filter(function(d) {
+      return d.name.toLowerCase().indexOf(searchQuery) !== -1
+          || d.ip.toLowerCase().indexOf(searchQuery) !== -1;
+    });
+    if (found.length === 1) {
+      // Единственное совпадение — центрируем
+      selId = found[0].id;
+      ox = canvas.width  / 2 - found[0].x;
+      oy = canvas.height / 2 - found[0].y;
+    } else {
+      selId = null;
+    }
+    draw();
+  } else {
+    selId = null;
+    draw();
+  }
+});
+
+// Фильтрация списка устройств по поиску
+var _origRenderList = renderList;
+renderList = function() {
+  var q = searchQuery;
+  var html = '';
+  var devices = mapData.devices;
+  if (q) {
+    devices = devices.filter(function(d) {
+      return d.name.toLowerCase().indexOf(q) !== -1
+          || d.ip.toLowerCase().indexOf(q) !== -1;
+    });
+  }
+  devices.forEach(function(d) {
+    var sc  = STATUS_COLOR[d.status] || '#8be9fd';
+    var lat = d.latency != null ? ' ' + d.latency.toFixed(0) + 'ms' : '';
+    var nm  = escHtml(d.name);
+    // Подсвечиваем совпадение
+    if (q) {
+      nm = nm.replace(
+        new RegExp('(' + escHtml(q) + ')', 'gi'),
+        '<mark style="background:#ffb86c;color:#1a1a2e;border-radius:2px">$1</mark>'
+      );
+    }
+    html += '<div class="di' + (d.id === selId ? ' sel' : '') + '" onclick="clickDevice(\'' + d.id + '\')">'
+          + '<div class="dn"><span style="color:' + sc + '">&#9679;</span> ' + nm
+          + '<span style="color:' + sc + ';font-size:10px">' + lat + '</span></div>'
+          + '<div class="dip">' + d.ip + ' &mdash; ' + d.dtype + '</div>'
+          + '</div>';
+  });
+  if (!html && q) {
+    html = '<div style="color:#555;padding:12px;font-size:12px">Ничего не найдено</div>';
+  }
+  document.getElementById('list').innerHTML = html;
+  document.getElementById('side-hdr').textContent =
+    'DEVICES  \u2014  ' + (currentTab || '...') + ' (' + mapData.devices.length + ')';
+};
+
+// ── Экспорт карты в PNG ───────────────────────────────────────────────────────
+document.getElementById('btn-png').addEventListener('click', function() {
+  // Создаём временный canvas для полной карты
+  var margin  = 40;
+  var devices = mapData.devices;
+  if (!devices.length) { alert('Нет устройств для экспорта'); return; }
+
+  var xs = devices.map(function(d){ return d.x + ox; });
+  var ys = devices.map(function(d){ return d.y + oy; });
+  var minX = Math.min.apply(null, xs) - margin;
+  var minY = Math.min.apply(null, ys) - margin - 20;
+  var maxX = Math.max.apply(null, xs) + margin + 120;
+  var maxY = Math.max.apply(null, ys) + margin + 120;
+
+  var tmpW = Math.max(800, maxX - minX);
+  var tmpH = Math.max(600, maxY - minY);
+
+  var tmp = document.createElement('canvas');
+  tmp.width  = tmpW;
+  tmp.height = tmpH;
+  var tc = tmp.getContext('2d');
+
+  // Фон
+  tc.fillStyle = '#1a1a2e';
+  tc.fillRect(0, 0, tmpW, tmpH);
+
+  // Сдвигаем чтобы всё поместилось
+  var dox = ox - minX, doy = oy - minY;
+
+  // Копируем логику draw() на tmpCanvas с нужным offset
+  var savedCtx = ctx, savedOx = ox, savedOy = oy;
+  // Переключаем ctx на tmp временно
+  ctx = tc;
+  ox  = dox;
+  oy  = doy;
+  scale = 1.0;
+  _origDraw();
+  // Возвращаем
+  ctx = savedCtx;
+  ox  = savedOx;
+  oy  = savedOy;
+
+  // Водяной знак
+  tc.fillStyle = 'rgba(255,184,108,0.3)';
+  tc.font = 'bold 14px Consolas';
+  tc.textAlign = 'right';
+  tc.textBaseline = 'bottom';
+  tc.fillText('NetMap Monitor  ' + new Date().toLocaleString(), tmpW - 10, tmpH - 6);
+
+  // Скачиваем
+  var link = document.createElement('a');
+  link.download = 'netmap_' + (currentTab || 'map') + '_'
+    + new Date().toISOString().slice(0,16).replace('T','_').replace(':','-') + '.png';
+  link.href = tmp.toDataURL('image/png');
+  link.click();
+});
+
+// ── Touch / мобильная поддержка (pinch-zoom + pan) ────────────────────────────
+var lastTouchDist = null;
+var lastTouchMid  = null;
+
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 1) {
+    drag   = true;
+    dragX  = e.touches[0].clientX;
+    dragY  = e.touches[0].clientY;
+    ox0    = ox; oy0 = oy;
+    lastTouchDist = null;
+  } else if (e.touches.length === 2) {
+    drag = false;
+    var t0 = e.touches[0], t1 = e.touches[1];
+    lastTouchDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    lastTouchMid  = {
+      x: (t0.clientX + t1.clientX) / 2,
+      y: (t0.clientY + t1.clientY) / 2
+    };
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 1 && drag) {
+    ox = ox0 + (e.touches[0].clientX - dragX);
+    oy = oy0 + (e.touches[0].clientY - dragY);
+    draw();
+  } else if (e.touches.length === 2 && lastTouchDist !== null) {
+    var t0   = e.touches[0], t1 = e.touches[1];
+    var dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    var mid  = { x:(t0.clientX+t1.clientX)/2, y:(t0.clientY+t1.clientY)/2 };
+    var factor   = dist / lastTouchDist;
+    var newScale = Math.max(0.2, Math.min(5.0, scale * factor));
+    var rect     = canvas.getBoundingClientRect();
+    var mx = mid.x - rect.left, my = mid.y - rect.top;
+    ox = mx - (mx - ox) * (newScale / scale);
+    oy = my - (my - oy) * (newScale / scale);
+    scale         = newScale;
+    lastTouchDist = dist;
+    lastTouchMid  = mid;
+    draw();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  if (e.touches.length === 0) {
+    drag = false;
+    lastTouchDist = null;
+  }
+}, { passive: false });
 
 window.addEventListener('load', function(){
   resize();

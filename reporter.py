@@ -60,6 +60,23 @@ class HistoryDB:
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (device_id, timestamp, metric_name, raw_value, numeric_value, unit))
 
+    def purge_old_records(self, max_age_days: int = 90):
+        """Удаляет записи старше max_age_days дней. Вызывать периодически."""
+        cutoff = datetime.datetime.now().timestamp() - max_age_days * 86400
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute(
+                "DELETE FROM snmp_history WHERE timestamp < ?", (cutoff,)
+            )
+            deleted = cur.rowcount
+        return deleted
+
+    def get_db_size_mb(self) -> float:
+        """Размер файла базы данных в МБ."""
+        try:
+            return os.path.getsize(self.db_path) / (1024 * 1024)
+        except OSError:
+            return 0.0
+
     def get_metrics_for_device(self, device_id: str, metric_name: str = None,
                                 start_ts: float = None, end_ts: float = None,
                                 limit: int = None) -> List[Tuple]:
@@ -88,6 +105,19 @@ class HistoryDB:
             return [row[0] for row in cur.fetchall()]
 
 history_db = HistoryDB()
+
+# Авто-очистка: удаляем записи старше 90 дней при запуске
+def _auto_purge():
+    """Запускается в фоне при старте — удаляет устаревшие записи."""
+    try:
+        deleted = history_db.purge_old_records(max_age_days=90)
+        if deleted:
+            print(f"[History] Удалено {deleted} устаревших записей (>90 дней)")
+    except Exception as e:
+        print(f"[History] Ошибка очистки: {e}")
+
+import threading as _threading
+_threading.Thread(target=_auto_purge, daemon=True).start()
 
 def store_snmp_data(dev: Device, snmp_data: dict):
     """Сохраняет все числовые SNMP-метрики устройства в БД."""
