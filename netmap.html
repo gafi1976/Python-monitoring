@@ -89,10 +89,10 @@ body { background:#1a1a2e; color:#fff; font-family:Consolas,monospace; overflow:
 
 /* ── Tooltip ── */
 #tip {
-  position:fixed; pointer-events:none; display:none;
+  position:fixed; pointer-events:auto; display:none;
   background:#1a1e33; border:1px solid #444466; border-radius:8px;
   padding:10px 13px; font-size:12px; z-index:20;
-  min-width:200px; max-width:300px; line-height:1.7;
+  min-width:200px; max-width:320px; line-height:1.7;
   box-shadow:0 6px 24px rgba(0,0,0,0.6);
 }
 #tip-chart-wrap {
@@ -562,7 +562,14 @@ canvas.addEventListener('mouseup', function(e){
 });
 canvas.addEventListener('mouseleave', function(){
   drag=false;
-  document.getElementById('tip').style.display='none';
+  tipVisible = false;
+  // Небольшая задержка — даём время мыши перейти на тултип
+  setTimeout(function() {
+    if (!tipVisible) {
+      document.getElementById('tip').style.display = 'none';
+      tipDevId = null;
+    }
+  }, 80);
 });
 
 function devAt(cx,cy){
@@ -574,12 +581,23 @@ function devAt(cx,cy){
 }
 
 // ── Tooltip с мини-графиком ───────────────────────────────────────────────────
-var tipDevId    = null;   // id устройства в тултипе сейчас
+var tipDevId    = null;
 var tipHistory  = {};     // кэш: "devId:period" -> metrics
-var tipTimer    = null;   // таймер задержки загрузки
-var tipPeriod   = '5m';   // текущий выбранный период
+var tipTimer    = null;
+var tipPeriod   = '5m';
+var tipVisible  = false;  // true если мышь над canvas ИЛИ над тултипом
 
-// Кнопки периода — привязываем обработчики
+// Тултип: не скрываем пока мышь над ним самим
+document.getElementById('tip').addEventListener('mouseenter', function() {
+  tipVisible = true;
+});
+document.getElementById('tip').addEventListener('mouseleave', function() {
+  tipVisible = false;
+  document.getElementById('tip').style.display = 'none';
+  tipDevId = null;
+});
+
+// Кнопки периода — клик мышью
 document.querySelectorAll('.tip-period-btn').forEach(function(btn) {
   btn.addEventListener('click', function(e) {
     e.stopPropagation();
@@ -593,7 +611,8 @@ document.querySelectorAll('.tip-period-btn').forEach(function(btn) {
     // Перегружаем график для текущего устройства с новым периодом
     if (tipDevId) {
       document.getElementById('tip-chart-title').textContent = 'Загрузка...';
-      loadTipHistory(tipDevId, true);  // true = force reload
+      document.getElementById('tip-chart-wrap').style.display = 'block';
+      loadTipHistory(tipDevId, true);
     }
   });
 });
@@ -603,13 +622,18 @@ function showTooltip(e) {
   var d   = devAt(e.offsetX, e.offsetY);
 
   if (!d) {
-    tip.style.display = 'none';
-    tipDevId = null;
-    if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; }
+    // Не скрываем если мышь ушла на сам тултип
+    if (!tipVisible) {
+      tip.style.display = 'none';
+      tipDevId = null;
+      if (tipTimer) { clearTimeout(tipTimer); tipTimer = null; }
+    }
     return;
   }
 
-  // Базовая информация — показываем сразу
+  tipVisible = true;
+
+  // Базовая информация
   var sc   = STATUS_COLOR[d.status] || '#8be9fd';
   var html = '<b>' + escHtml(d.name) + '</b><br>'
            + d.ip + '<br>'
@@ -617,13 +641,11 @@ function showTooltip(e) {
   if (d.latency != null) html += '<br>Ping: ' + d.latency.toFixed(1) + ' ms';
   if (d.last_checked)    html += '<br>' + d.last_checked;
 
-  // SNMP текущие значения
   if (d.snmp_info) {
     Object.keys(d.snmp_info).forEach(function(k) {
       var lo = k.toLowerCase();
-      var isTemp = lo.indexOf('temp') !== -1 || lo.indexOf('sensor') !== -1;
-      if (isTemp) {
-        html += '<br><span style="color:#f1fa8c">🌡 ' + escHtml(k) + ': '
+      if (lo.indexOf('temp') !== -1 || lo.indexOf('sensor') !== -1) {
+        html += '<br><span style="color:#f1fa8c">&#127777; ' + escHtml(k) + ': '
               + escHtml(String(d.snmp_info[k])) + '</span>';
       }
     });
@@ -632,20 +654,21 @@ function showTooltip(e) {
   document.getElementById('tip-info').innerHTML = html;
   tip.style.display = 'block';
 
-  // Позиция тултипа
+  // Позиция — не перемещаем если мышь уже над тултипом
   var tx = e.clientX + 16, ty = e.clientY - 10;
-  if (tx + 310 > window.innerWidth)  tx = e.clientX - 310;
-  if (ty + 200 > window.innerHeight) ty = e.clientY - 200;
+  if (tx + 340 > window.innerWidth)  tx = e.clientX - 340;
+  if (ty + 260 > window.innerHeight) ty = e.clientY - 260;
+  if (ty < 0) ty = 10;
   tip.style.left = tx + 'px';
   tip.style.top  = ty + 'px';
 
-  // Если устройство сменилось — загружаем историю с задержкой CFG.tipDelay
+  // Если устройство сменилось — загружаем историю
   if (d.id !== tipDevId) {
     tipDevId = d.id;
     document.getElementById('tip-chart-wrap').style.display = 'none';
     if (tipTimer) clearTimeout(tipTimer);
     tipTimer = setTimeout(function() {
-      loadTipHistory(d.id);
+      loadTipHistory(d.id, false);
     }, CFG.tipDelay);
   }
 }
@@ -656,18 +679,26 @@ function loadTipHistory(devId, forceReload) {
     drawTipChart(devId, tipHistory[cacheKey]);
     return;
   }
-  fetch('/api/history/' + encodeURIComponent(devId) + '?period=' + tipPeriod)
+  // Запоминаем период и devId в момент запроса
+  var reqPeriod = tipPeriod;
+  var reqDevId  = devId;
+  fetch('/api/history/' + encodeURIComponent(devId) + '?period=' + reqPeriod)
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok && data.metrics) {
-        tipHistory[cacheKey] = data.metrics;
-        if (tipDevId === devId) {
-          drawTipChart(devId, data.metrics);
+        var key = reqDevId + ':' + reqPeriod;
+        tipHistory[key] = data.metrics;
+        // Рисуем только если устройство и период всё ещё актуальны
+        if (tipDevId === reqDevId && tipPeriod === reqPeriod) {
+          drawTipChart(reqDevId, data.metrics);
         }
+      } else {
+        document.getElementById('tip-chart-title').textContent =
+          data.error || 'Нет данных';
       }
     })
-    .catch(function() {
-      document.getElementById('tip-chart-title').textContent = 'Ошибка загрузки';
+    .catch(function(err) {
+      document.getElementById('tip-chart-title').textContent = 'Ошибка: ' + err.message;
     });
 }
 
