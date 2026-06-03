@@ -184,7 +184,7 @@ function draw() {
   var dm = {};
   mapData.devices.forEach(function(d){ dm[d.id] = d; });
 
-  // Соединения
+  // Проход 1: только линии (без меток — метки рисуем после, поверх линий)
   mapData.connections.forEach(function(c) {
     var d1=dm[c.from], d2=dm[c.to];
     if (!d1||!d2) return;
@@ -196,19 +196,27 @@ function draw() {
     ctx.setLineDash(both ? [] : [5,5]);
     ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
     ctx.setLineDash([]);
+  });
 
-    // Метки на линии
+  // Проход 2: метки на линиях (поверх линий, под устройствами)
+  mapData.connections.forEach(function(c) {
+    var d1=dm[c.from], d2=dm[c.to];
+    if (!d1||!d2) return;
+    var x1=d1.x+ox, y1=d1.y+oy, x2=d2.x+ox, y2=d2.y+oy;
     var mx=(x1+x2)/2, my=(y1+y2)/2;
     var ll = mapData.labels.filter(function(l){
       return (l.from===c.from&&l.to===c.to)||(l.from===c.to&&l.to===c.from);
     });
-    if (ll.length) {
-      var lines = ll.map(function(l){
-        var sh = l.label.replace(/ \[.*\]$/, '');
-        return sh + ': ' + (l.value!=null ? l.value+(l.unit?' '+l.unit:'') : '...');
-      });
-      drawLabelBox(mx, my, lines);
-    }
+    if (!ll.length) return;
+    var lines = ll.map(function(l){
+      // Убираем суффикс " [instance]" — ленивый квантор чтобы не съесть лишнее
+      var sh = l.label.replace(/ \[.*?\]$/, '');
+      var val = (l.value != null)
+        ? String(l.value) + (l.unit ? ' ' + l.unit : '')
+        : '...';
+      return sh + ': ' + val;
+    });
+    drawLabelBox(mx, my, lines);
   });
 
   // Устройства
@@ -275,14 +283,55 @@ function draw() {
 }
 
 function drawLabelBox(mx, my, lines) {
-  ctx.font='11px Consolas';
-  var lh=16, px=7, py=4, mw=0;
-  lines.forEach(function(l){ var w=ctx.measureText(l).width; if(w>mw)mw=w; });
-  var bw=mw+px*2, bh=lines.length*lh+py*2, bx=mx-bw/2, by=my-bh/2;
-  ctx.fillStyle='#1a2233'; ctx.strokeStyle='#444466'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.rect(bx,by,bw,bh); ctx.fill(); ctx.stroke();
-  ctx.fillStyle='#ffb86c'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  lines.forEach(function(l,i){ ctx.fillText(l, mx, by+py+(i+0.5)*lh); });
+  ctx.font = '11px Consolas';
+  var lh=18, px=8, py=5, mw=0;
+  lines.forEach(function(l){ var w=ctx.measureText(l).width; if(w>mw) mw=w; });
+  var bw=mw+px*2, bh=lines.length*lh+py*2;
+  var bx=mx-bw/2, by=my-bh/2;
+
+  // Фон с тенью
+  ctx.shadowColor   = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur    = 6;
+  ctx.shadowOffsetX = 2;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle     = '#0f1a2e';
+  ctx.strokeStyle   = '#ffb86c';
+  ctx.lineWidth     = 1.5;
+  ctx.beginPath();
+  // Скруглённые углы (r=4)
+  var r = 4;
+  ctx.moveTo(bx+r, by);
+  ctx.lineTo(bx+bw-r, by);   ctx.arcTo(bx+bw, by,    bx+bw, by+r,    r);
+  ctx.lineTo(bx+bw, by+bh-r); ctx.arcTo(bx+bw, by+bh, bx+bw-r, by+bh, r);
+  ctx.lineTo(bx+r, by+bh);    ctx.arcTo(bx,    by+bh, bx,    by+bh-r, r);
+  ctx.lineTo(bx, by+r);       ctx.arcTo(bx,    by,    bx+r,  by,      r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur  = 0;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+  ctx.stroke();
+
+  // Текст строк
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  lines.forEach(function(l, i) {
+    // Цвет по типу метрики
+    var lo = l.toLowerCase();
+    if (lo.indexOf('inoctets') !== -1 || lo.indexOf('rxbytes') !== -1) {
+      ctx.fillStyle = '#50fa7b';   // входящий — зелёный
+    } else if (lo.indexOf('outoctets') !== -1 || lo.indexOf('txbytes') !== -1) {
+      ctx.fillStyle = '#ffb86c';   // исходящий — оранжевый
+    } else if (lo.indexOf('error') !== -1) {
+      ctx.fillStyle = '#ff5555';   // ошибки — красный
+    } else if (lo.indexOf('status') !== -1) {
+      ctx.fillStyle = '#8be9fd';   // статус — голубой
+    } else {
+      ctx.fillStyle = '#ffffff';   // остальное — белый
+    }
+    ctx.fillText(l, mx, by + py + (i + 0.5) * lh);
+  });
 }
 
 // ── Tab bar ──────────────────────────────────────────────────────────────────
